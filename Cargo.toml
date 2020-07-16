@@ -1,0 +1,29 @@
+[package]
+name = "h2transformer"
+version = "0.0.0"
+authors = ["iagox86 <ron-git@skullsecurity.org>"]
+edition = "2018"
+description = "A collection of transformations for u8 arrays."
+license = "MIT"
+documentation = "https://github.com/h2gb/h2transformer"
+homepage = "https://github.com/h2gb/h2transformer"
+repository = "https://github.com/h2gb/h2transformer"
+readme = "README.md"
+
+[features]
+# serialize = ["serde", "ron"]
+
+[dependencies]
+# Serialize / deserialize are disabled by default
+#serde = { version = "~1.0.110", optional = true }
+#ron   = { version = "~0.5.1",   optional = true }
+simple-error = "~0.2.1"
+base64 = "~0.12.3"
+base32 = "~0.4.0"
+
+[dev-dependencies]
+pretty_assertions = "~0.6.1"
+
+# This lets us use special features in our documentation
+[package.metadata."docs.rs"]
+all-features = true
