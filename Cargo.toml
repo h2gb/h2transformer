@@ -20,6 +20,7 @@ readme = "README.md"
 simple-error = "~0.2.1"
 base64 = "~0.12.3"
 base32 = "~0.4.0"
+inflate = "~0.4.5"
 
 [dev-dependencies]
 pretty_assertions = "~0.6.1"

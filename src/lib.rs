@@ -12,8 +12,10 @@
 //! ```
 
 use simple_error::{SimpleResult, bail};
+
 use base64;
 use base32;
+use inflate;
 
 #[cfg(feature = "serialize")]
 use serde::{Serialize, Deserialize};
@@ -35,7 +37,9 @@ pub enum Transformation {
     FromBase32Permissive,
     FromBase32CrockfordPermissive,
     XorByConstant(u8),
-    //UnDeflate,
+
+    FromDeflated,
+    FromDeflatedZlib,
 }
 
 impl Transformation {
@@ -139,8 +143,19 @@ impl Transformation {
         }
     }
 
-    // fn from_deflate_transform(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
-    // }
+    fn transform_deflated(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
+        match inflate::inflate_bytes(&buffer) {
+            Ok(b) => Ok(b),
+            Err(e) => bail!("Couldn't inflate: {}", e),
+        }
+    }
+
+    fn transform_deflated_zlib(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
+        match inflate::inflate_bytes_zlib(&buffer) {
+            Ok(b) => Ok(b),
+            Err(e) => bail!("Couldn't inflate: {}", e),
+        }
+    }
 
     pub fn transform(&self, buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         match self {
@@ -158,6 +173,9 @@ impl Transformation {
 
             Self::FromBase32Permissive               => Self::transform_base32_permissive(buffer, base32::Alphabet::RFC4648 { padding: false }),
             Self::FromBase32CrockfordPermissive      => Self::transform_base32_permissive(buffer, base32::Alphabet::Crockford),
+
+            Self::FromDeflated                       => Self::transform_deflated(buffer),
+            Self::FromDeflatedZlib                   => Self::transform_deflated_zlib(buffer),
         }
     }
 
@@ -187,12 +205,16 @@ impl Transformation {
 
             Self::FromBase32Permissive          => bail!("Base32Permissive is one-way"),
             Self::FromBase32CrockfordPermissive => bail!("Base32CrockfordPermissive is one-way"),
+
+            Self::FromDeflated                  => bail!("Deflated is one-way"),
+            Self::FromDeflatedZlib              => bail!("DeflatedZlib is one-way"),
         }
     }
 
     pub fn can_untransform(&self) -> bool {
         match self {
             Self::Null                          => true,
+            Self::XorByConstant(_)              => true,
             Self::FromBase64Standard            => true,
             Self::FromBase64Custom(_)           => true,
             Self::FromBase64Permissive          => false,
@@ -202,7 +224,8 @@ impl Transformation {
             Self::FromBase32Crockford           => true,
             Self::FromBase32Permissive          => false,
             Self::FromBase32CrockfordPermissive => false,
-            Self::XorByConstant(_)              => true,
+            Self::FromDeflated                  => false,
+            Self::FromDeflatedZlib              => false,
         }
     }
 }
@@ -213,7 +236,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn test_null() {
+    fn test_null() -> SimpleResult<()> {
         assert_eq!(true, Transformation::Null.can_untransform());
 
         let tests: Vec<(Vec<u8>, SimpleResult<Vec<u8>>)> = vec![
@@ -227,13 +250,15 @@ mod tests {
             let result = Transformation::Null.transform(test.clone());
             assert_eq!(expected, result);
 
-            let result = Transformation::Null.untransform(result.unwrap());
+            let result = Transformation::Null.untransform(result?);
             assert_eq!(Ok(test), result);
         }
+
+        Ok(())
     }
 
     #[test]
-    fn test_xor_by_constant() {
+    fn test_xor_by_constant() -> SimpleResult<()> {
         assert_eq!(true, Transformation::XorByConstant(0).can_untransform());
 
         let tests: Vec<(u8, Vec<u8>, SimpleResult<Vec<u8>>)> = vec![
@@ -256,9 +281,11 @@ mod tests {
             let result = Transformation::XorByConstant(c).transform(test.clone());
             assert_eq!(expected, result);
 
-            let result = Transformation::XorByConstant(c).untransform(result.unwrap());
+            let result = Transformation::XorByConstant(c).untransform(result?);
             assert_eq!(Ok(test), result);
         }
+
+        Ok(())
     }
 
     // Just a small convenience function for tests
@@ -579,16 +606,16 @@ mod tests {
 
         // Do padding wrong
         let t = Transformation::FromBase32Permissive;
-        assert_eq!(b(b"A"), t.transform(b(b"IE")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"IE=")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"IE==")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"IE===")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"IE====")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"IE=====")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"IE=============")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"I=============E")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"IE=============")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"I.@#$...E...======")).unwrap());
+        assert_eq!(b(b"A"), t.transform(b(b"IE"))?);
+        assert_eq!(b(b"A"), t.transform(b(b"IE="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"IE=="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"IE==="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"IE===="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"IE====="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"IE============="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"I=============E"))?);
+        assert_eq!(b(b"A"), t.transform(b(b"IE============="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"I.@#$...E...======"))?);
 
         // We can still error with bad characters
         assert!(t.transform(b(b"1234567890")).is_err());
@@ -623,19 +650,79 @@ mod tests {
 
         // Do padding wrong
         let t = Transformation::FromBase32CrockfordPermissive;
-        assert_eq!(b(b"A"), t.transform(b(b"84")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"84=")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"84==")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"84===")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"84====")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"84=====")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"84=============")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"8==---========4")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"84=============")).unwrap());
-        assert_eq!(b(b"A"), t.transform(b(b"8.@#$...4...======")).unwrap());
+        assert_eq!(b(b"A"), t.transform(b(b"84"))?);
+        assert_eq!(b(b"A"), t.transform(b(b"84="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"84=="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"84==="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"84===="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"84====="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"84============="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"8==---========4"))?);
+        assert_eq!(b(b"A"), t.transform(b(b"84============="))?);
+        assert_eq!(b(b"A"), t.transform(b(b"8.@#$...4...======"))?);
 
         // We can still error with bad characters
         assert!(t.transform(b(b"no u")).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_deflate() -> SimpleResult<()> {
+        let t = Transformation::FromDeflated;
+
+        let result = t.transform(b(b"\x03\x00\x00\x00\x00\x01"))?;
+        assert_eq!(0, result.len());
+
+        let result = t.transform(b(b"\x63\x00\x00\x00\x01\x00\x01"))?;
+        assert_eq!(vec![0x00], result);
+
+        let result = t.transform(b(b"\x63\x60\x80\x01\x00\x00\x0a\x00\x01"))?;
+        assert_eq!(vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], result);
+
+        let result = t.transform(b(b"\x63\x60\x64\x62\x66\x61\x65\x63\xe7\xe0\x04\x00\x00\xaf\x00\x2e"))?;
+        assert_eq!(vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09], result);
+
+        // Best compression
+        let result = t.transform(b(b"\x73\x74\x72\x76\x01\x00\x02\x98\x01\x0b"))?;
+        assert_eq!(vec![0x41, 0x42, 0x43, 0x44], result);
+
+        // No compression
+        let result = t.transform(b(b"\x01\x04\x00\xfb\xff\x41\x42\x43\x44\x02\x98\x01\x0b"))?;
+        assert_eq!(vec![0x41, 0x42, 0x43, 0x44], result);
+
+        // Try an intentional error
+        assert!(t.transform(b(b"\xFF")).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_deflate_zlib() -> SimpleResult<()> {
+        let t = Transformation::FromDeflatedZlib;
+
+        let result = t.transform(b(b"\x78\x9c\x03\x00\x00\x00\x00\x01"))?;
+        assert_eq!(0, result.len());
+
+        let result = t.transform(b(b"\x78\x9c\x63\x00\x00\x00\x01\x00\x01"))?;
+        assert_eq!(vec![0x00], result);
+
+        let result = t.transform(b(b"\x78\x9c\x63\x60\x80\x01\x00\x00\x0a\x00\x01"))?;
+        assert_eq!(vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], result);
+
+        let result = t.transform(b(b"\x78\x9c\x63\x60\x64\x62\x66\x61\x65\x63\xe7\xe0\x04\x00\x00\xaf\x00\x2e"))?;
+        assert_eq!(vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09], result);
+
+        // Best compression
+        let result = t.transform(b(b"\x78\x9c\x73\x74\x72\x76\x01\x00\x02\x98\x01\x0b"))?;
+        assert_eq!(vec![0x41, 0x42, 0x43, 0x44], result);
+
+        // No compression
+        let result = t.transform(b(b"\x78\x01\x01\x04\x00\xfb\xff\x41\x42\x43\x44\x02\x98\x01\x0b"))?;
+        assert_eq!(vec![0x41, 0x42, 0x43, 0x44], result);
+
+        // Try an intentional error
+        assert!(t.transform(b(b"\xFF")).is_err());
 
         Ok(())
     }
