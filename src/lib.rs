@@ -1,11 +1,26 @@
 //! [![Crate](https://img.shields.io/crates/v/h2transformer.svg)](https://crates.io/crates/h2transformer)
 //!
-//! A thingy
+//! H2Transformer is a library for transforming raw data between encodings.
 //!
-//! # Goal
 //!
+//! # Features
+//!
+//! Conversions are bidirectional when possible. That means data can be
+//! converted, edited, then converted back *without changing the length*.
+//!
+//! There is NO guarantee that the data will be identical aftewards, however;
+//! `FromBase32` will normalize case.
+//!
+//! The other big feature is detecting encoding. A buffer can be analyzed and
+//! a list of possible formats are returned.
+//!
+//! We attempt to be efficient by - whenever possible - editing the buffer in-
+//! place. Detecting encoding is slow, however, since we literally clone +
+//! convert the vector.
 //!
 //! # Usage
+//!
+//! TODO
 //!
 //!
 //! ```
@@ -24,23 +39,43 @@ use serde::{Serialize, Deserialize};
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Transformation {
     Null,
-    //FromHex,
-    //FromBinary,
-    FromBase64Standard,
-    FromBase64Custom(base64::Config),
+
+    XorByConstant(u8),
+
+    FromBase64,
     FromBase64Permissive,
+    FromBase64Custom(base64::Config),
     FromBase64CustomPermissive(base64::Config),
-    FromBase32Standard,
+    FromBase32,
     FromBase32NoPadding,
     FromBase32Crockford,
 
     FromBase32Permissive,
     FromBase32CrockfordPermissive,
-    XorByConstant(u8),
 
     FromDeflated,
     FromDeflatedZlib,
+
+    //FromHex,
+    //FromBinary,
 }
+
+const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 10] = [
+    Transformation::Null,
+
+    Transformation::FromBase64,
+    Transformation::FromBase64Permissive,
+    Transformation::FromBase32,
+    Transformation::FromBase32NoPadding,
+    Transformation::FromBase32Crockford,
+
+    Transformation::FromBase32Permissive,
+    Transformation::FromBase32CrockfordPermissive,
+
+    Transformation::FromDeflated,
+    Transformation::FromDeflatedZlib,
+];
+// ]);
 
 impl Transformation {
     fn transform_null(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
@@ -49,6 +84,10 @@ impl Transformation {
 
     fn untransform_null(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         Ok(buffer)
+    }
+
+    fn check_null(_buffer: &Vec<u8>) -> bool {
+        true
     }
 
     fn transform_xor8(mut buffer: Vec<u8>, c: u8) -> SimpleResult<Vec<u8>> {
@@ -61,6 +100,10 @@ impl Transformation {
 
     fn untransform_xor8(buffer: Vec<u8>, c: u8) -> SimpleResult<Vec<u8>> {
         Self::transform_xor8(buffer, c)
+    }
+
+    fn check_xor8(_buffer: &Vec<u8>, _c: u8) -> bool {
+        true
     }
 
     fn transform_base64(buffer: Vec<u8>, config: base64::Config) -> SimpleResult<Vec<u8>> {
@@ -84,6 +127,12 @@ impl Transformation {
         Ok(base64::encode_config(buffer, config).into_bytes())
     }
 
+    fn check_base64(buffer: &Vec<u8>, config: base64::Config) -> bool {
+        // The only reasonable way to check is by just doing it (since the
+        // config is opaque to us)
+        Self::transform_base64(buffer.clone(), config).is_ok()
+    }
+
     fn transform_base64_permissive(buffer: Vec<u8>, config: base64::Config) -> SimpleResult<Vec<u8>> {
         // Filter out any control characters and spaces
         let buffer: Vec<u8> = buffer.into_iter().filter(|b| {
@@ -97,6 +146,12 @@ impl Transformation {
         };
 
         Ok(out)
+    }
+
+    fn check_base64_permissive(buffer: &Vec<u8>, config: base64::Config) -> bool {
+        // The only reasonable way to check is by just doing it (since the
+        // config is opaque to us)
+        Self::transform_base64_permissive(buffer.clone(), config).is_ok()
     }
 
     fn transform_base32(buffer: Vec<u8>, alphabet: base32::Alphabet) -> SimpleResult<Vec<u8>> {
@@ -125,6 +180,11 @@ impl Transformation {
         Ok(base32::encode(alphabet, &buffer).into_bytes())
     }
 
+    fn check_base32(buffer: &Vec<u8>, alphabet: base32::Alphabet) -> bool {
+        // The only reasonable way to check is by just doing it
+        Self::transform_base32(buffer.clone(), alphabet).is_ok()
+    }
+
     fn transform_base32_permissive(buffer: Vec<u8>, alphabet: base32::Alphabet) -> SimpleResult<Vec<u8>> {
         // Filter out any obviously impossible characters
         let buffer: Vec<u8> = buffer.into_iter().filter(|b| {
@@ -143,11 +203,21 @@ impl Transformation {
         }
     }
 
+    fn check_base32_permissive(buffer: &Vec<u8>, alphabet: base32::Alphabet) -> bool {
+        // The only reasonable way to check is by just doing it
+        Self::transform_base32_permissive(buffer.clone(), alphabet).is_ok()
+    }
+
     fn transform_deflated(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         match inflate::inflate_bytes(&buffer) {
             Ok(b) => Ok(b),
             Err(e) => bail!("Couldn't inflate: {}", e),
         }
+    }
+
+    fn check_deflated(buffer: &Vec<u8>) -> bool {
+        // The only reasonable way to check is by just doing it
+        Self::transform_deflated(buffer.clone()).is_ok()
     }
 
     fn transform_deflated_zlib(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
@@ -157,17 +227,22 @@ impl Transformation {
         }
     }
 
+    fn check_deflated_zlib(buffer: &Vec<u8>) -> bool {
+        // The only reasonable way to check is by just doing it
+        Self::transform_deflated_zlib(buffer.clone()).is_ok()
+    }
+
     pub fn transform(&self, buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         match self {
             Self::Null                               => Self::transform_null(buffer),
             Self::XorByConstant(c)                   => Self::transform_xor8(buffer, *c),
 
-            Self::FromBase64Standard                 => Self::transform_base64(buffer, base64::STANDARD),
+            Self::FromBase64                         => Self::transform_base64(buffer, base64::STANDARD),
             Self::FromBase64Custom(config)           => Self::transform_base64(buffer, *config),
             Self::FromBase64Permissive               => Self::transform_base64_permissive(buffer, base64::STANDARD),
             Self::FromBase64CustomPermissive(config) => Self::transform_base64_permissive(buffer, *config),
 
-            Self::FromBase32Standard                 => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
+            Self::FromBase32                         => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
             Self::FromBase32NoPadding                => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
             Self::FromBase32Crockford                => Self::transform_base32(buffer, base32::Alphabet::Crockford),
 
@@ -179,27 +254,17 @@ impl Transformation {
         }
     }
 
-    pub fn can_transform(&self, buffer: &Vec<u8>) -> bool {
-        match self {
-            Self::Null             => true,
-            Self::XorByConstant(_) => true,
-
-            // When we can't be sure, just clone the buffer and try
-            _                      => self.transform(buffer.clone()).is_ok(),
-        }
-    }
-
     pub fn untransform(&self, buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         match self {
             Self::Null                          => Self::untransform_null(buffer),
             Self::XorByConstant(c)              => Self::untransform_xor8(buffer, *c),
 
-            Self::FromBase64Standard            => Self::untransform_base64(buffer, base64::STANDARD),
+            Self::FromBase64                    => Self::untransform_base64(buffer, base64::STANDARD),
             Self::FromBase64Custom(config)      => Self::untransform_base64(buffer, *config),
             Self::FromBase64Permissive          => bail!("Base64Permissive is one-way"),
             Self::FromBase64CustomPermissive(_) => bail!("Base64CustomPermissive is one-way"),
 
-            Self::FromBase32Standard            => Self::untransform_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
+            Self::FromBase32                    => Self::untransform_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
             Self::FromBase32NoPadding           => Self::untransform_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
             Self::FromBase32Crockford           => Self::untransform_base32(buffer, base32::Alphabet::Crockford),
 
@@ -211,15 +276,37 @@ impl Transformation {
         }
     }
 
+    pub fn can_transform(&self, buffer: &Vec<u8>) -> bool {
+        match self {
+            Self::Null                               => Self::check_null(buffer),
+            Self::XorByConstant(c)                   => Self::check_xor8(buffer, *c),
+
+            Self::FromBase64                         => Self::check_base64(buffer, base64::STANDARD),
+            Self::FromBase64Custom(config)           => Self::check_base64(buffer, *config),
+            Self::FromBase64Permissive               => Self::check_base64_permissive(buffer, base64::STANDARD),
+            Self::FromBase64CustomPermissive(config) => Self::check_base64_permissive(buffer, *config),
+
+            Self::FromBase32                         => Self::check_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
+            Self::FromBase32NoPadding                => Self::check_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
+            Self::FromBase32Crockford                => Self::check_base32(buffer, base32::Alphabet::Crockford),
+
+            Self::FromBase32Permissive               => Self::check_base32_permissive(buffer, base32::Alphabet::RFC4648 { padding: false }),
+            Self::FromBase32CrockfordPermissive      => Self::check_base32_permissive(buffer, base32::Alphabet::Crockford),
+
+            Self::FromDeflated                       => Self::check_deflated(buffer),
+            Self::FromDeflatedZlib                   => Self::check_deflated_zlib(buffer),
+        }
+    }
+
     pub fn can_untransform(&self) -> bool {
         match self {
             Self::Null                          => true,
             Self::XorByConstant(_)              => true,
-            Self::FromBase64Standard            => true,
+            Self::FromBase64                    => true,
             Self::FromBase64Custom(_)           => true,
             Self::FromBase64Permissive          => false,
             Self::FromBase64CustomPermissive(_) => false,
-            Self::FromBase32Standard            => true,
+            Self::FromBase32                    => true,
             Self::FromBase32NoPadding           => true,
             Self::FromBase32Crockford           => true,
             Self::FromBase32Permissive          => false,
@@ -227,6 +314,12 @@ impl Transformation {
             Self::FromDeflated                  => false,
             Self::FromDeflatedZlib              => false,
         }
+    }
+
+    pub fn detect(buffer: &Vec<u8>) -> Vec<&Transformation> {
+        TRANSFORMATIONS_THAT_CAN_BE_DETECTED.iter().filter(|t| {
+            t.can_transform(buffer)
+        }).collect()
     }
 }
 
@@ -295,46 +388,46 @@ mod tests {
 
     #[test]
     fn test_base64_standard() -> SimpleResult<()> {
-        let t = Transformation::FromBase64Standard;
+        let t = Transformation::FromBase64;
         assert_eq!(true, t.can_untransform());
 
         // Empty string: ""
-        let t = Transformation::FromBase64Standard;
+        let t = Transformation::FromBase64;
         let result = t.transform(b(b""))?;
         assert_eq!(b(b""), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b""), original);
 
         // Short string: "\x00"
-        let t = Transformation::FromBase64Standard;
+        let t = Transformation::FromBase64;
         let result = t.transform(b(b"AA=="))?;
         assert_eq!(b(b"\x00"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AA=="), original);
 
         // Longer string: "\x00\x01\x02\x03\x04\x05\x06"
-        let t = Transformation::FromBase64Standard;
+        let t = Transformation::FromBase64;
         let result = t.transform(b(b"AAECAwQFBg=="))?;
         assert_eq!(b(b"\x00\x01\x02\x03\x04\x05\x06"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AAECAwQFBg=="), original);
 
         // Weird string: "\x69\xaf\xbe\xff\x3f"
-        let t = Transformation::FromBase64Standard;
+        let t = Transformation::FromBase64;
         let result = t.transform(b(b"aa++/z8="))?;
         assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"aa++/z8="), original);
 
         // Do padding wrong
-        let t = Transformation::FromBase64Standard;
+        let t = Transformation::FromBase64;
         assert!(t.transform(b(b"AA")).is_err());
         assert!(t.transform(b(b"AA=")).is_err());
         assert!(t.transform(b(b"AA===")).is_err());
         assert!(t.transform(b(b"AA====")).is_err());
 
         // Wrong characters
-        let t = Transformation::FromBase64Standard;
+        let t = Transformation::FromBase64;
         assert!(t.transform(b(b"aa--_z8=")).is_err());
 
         Ok(())
@@ -428,39 +521,39 @@ mod tests {
 
     #[test]
     fn test_base32_standard() -> SimpleResult<()> {
-        let t = Transformation::FromBase32Standard;
+        let t = Transformation::FromBase32;
         assert_eq!(true, t.can_untransform());
 
         // Empty string: ""
-        let t = Transformation::FromBase32Standard;
+        let t = Transformation::FromBase32;
         let result = t.transform(b(b""))?;
         assert_eq!(b(b""), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b""), original);
 
         // Short string: "\x00"
-        let t = Transformation::FromBase32Standard;
+        let t = Transformation::FromBase32;
         let result = t.transform(b(b"IE======"))?;
         assert_eq!(b(b"A"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IE======"), original);
 
         // Longer string: "ABCDEF"
-        let t = Transformation::FromBase32Standard;
+        let t = Transformation::FromBase32;
         let result = t.transform(b(b"IFBEGRCFIY======"))?;
         assert_eq!(b(b"ABCDEF"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IFBEGRCFIY======"), original);
 
         // It's okay to be case insensitive
-        let t = Transformation::FromBase32Standard;
+        let t = Transformation::FromBase32;
         let result = t.transform(b(b"ifbegrcfiy======"))?;
         assert_eq!(b(b"ABCDEF"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IFBEGRCFIY======"), original);
 
         // Do padding wrong
-        let t = Transformation::FromBase32Standard;
+        let t = Transformation::FromBase32;
         assert!(t.transform(b(b"IE")).is_err());
         assert!(t.transform(b(b"IE=")).is_err());
         assert!(t.transform(b(b"IE==")).is_err());
@@ -471,7 +564,7 @@ mod tests {
         assert!(t.transform(b(b"IE========")).is_err());
 
         // Wrong characters
-        let t = Transformation::FromBase32Standard;
+        let t = Transformation::FromBase32;
         assert!(t.transform(b(b"I.======")).is_err());
 
         Ok(())
@@ -723,6 +816,28 @@ mod tests {
 
         // Try an intentional error
         assert!(t.transform(b(b"\xFF")).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_detect() -> SimpleResult<()> {
+        // let r = Transformation::detect(&b(b"\x78\x9c\x03\x00\x00\x00\x00\x01"));
+        // let expected: Vec<Transformation> = vec![
+        //     Transformation::Null,
+        //     Transformation::FromBase32Permissive,
+        //     Transformation::FromBase32CrockfordPermissive,
+        //     Transformation::FromDeflatedZlib
+        // ];
+        // assert_eq!(expected, r);
+
+        //println!("{:?}", ;
+
+        // println!("{:?}", Transformation::detect(&b(b"AAECAwQFBg==")));
+        // println!("{:?}", Transformation::detect(&b(b"aa--_z8")));
+        // println!("{:?}", Transformation::detect(&b(b"\x03\x00\x00\x00\x00\x01")));
+        // println!("{:?}", Transformation::detect(&b(b"IE=====")));
+        // println!("{:?}", Transformation::detect(&b(b"A A\nAAA\n    \t\rA=\n=")));
 
         Ok(())
     }
