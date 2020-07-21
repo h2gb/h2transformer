@@ -35,17 +35,20 @@ use inflate;
 #[cfg(feature = "serialize")]
 use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialOrd, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Transformation {
     Null,
-
-    XorByConstant(u8),
+    XorByConstant8(u8),
 
     FromBase64,
+    FromBase64NoPadding,
     FromBase64Permissive,
-    FromBase64Custom(base64::Config),
-    FromBase64CustomPermissive(base64::Config),
+
+    FromBase64URL,
+    FromBase64URLNoPadding,
+    FromBase64URLPermissive,
+
     FromBase32,
     FromBase32NoPadding,
     FromBase32Crockford,
@@ -60,11 +63,15 @@ pub enum Transformation {
     //FromBinary,
 }
 
-const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 10] = [
+const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 14] = [
     Transformation::Null,
 
     Transformation::FromBase64,
+    Transformation::FromBase64NoPadding,
     Transformation::FromBase64Permissive,
+    Transformation::FromBase64URL,
+    Transformation::FromBase64URLNoPadding,
+    Transformation::FromBase64URLPermissive,
     Transformation::FromBase32,
     Transformation::FromBase32NoPadding,
     Transformation::FromBase32Crockford,
@@ -235,12 +242,15 @@ impl Transformation {
     pub fn transform(&self, buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         match self {
             Self::Null                               => Self::transform_null(buffer),
-            Self::XorByConstant(c)                   => Self::transform_xor8(buffer, *c),
+            Self::XorByConstant8(c)                  => Self::transform_xor8(buffer, *c),
 
             Self::FromBase64                         => Self::transform_base64(buffer, base64::STANDARD),
-            Self::FromBase64Custom(config)           => Self::transform_base64(buffer, *config),
-            Self::FromBase64Permissive               => Self::transform_base64_permissive(buffer, base64::STANDARD),
-            Self::FromBase64CustomPermissive(config) => Self::transform_base64_permissive(buffer, *config),
+            Self::FromBase64NoPadding                => Self::transform_base64(buffer, base64::STANDARD_NO_PAD),
+            Self::FromBase64Permissive               => Self::transform_base64_permissive(buffer, base64::STANDARD_NO_PAD),
+
+            Self::FromBase64URL                      => Self::transform_base64(buffer, base64::URL_SAFE),
+            Self::FromBase64URLNoPadding             => Self::transform_base64(buffer, base64::URL_SAFE_NO_PAD),
+            Self::FromBase64URLPermissive            => Self::transform_base64_permissive(buffer, base64::URL_SAFE_NO_PAD),
 
             Self::FromBase32                         => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
             Self::FromBase32NoPadding                => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
@@ -257,12 +267,15 @@ impl Transformation {
     pub fn untransform(&self, buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         match self {
             Self::Null                          => Self::untransform_null(buffer),
-            Self::XorByConstant(c)              => Self::untransform_xor8(buffer, *c),
+            Self::XorByConstant8(c)             => Self::untransform_xor8(buffer, *c),
 
             Self::FromBase64                    => Self::untransform_base64(buffer, base64::STANDARD),
-            Self::FromBase64Custom(config)      => Self::untransform_base64(buffer, *config),
+            Self::FromBase64NoPadding           => Self::untransform_base64(buffer, base64::STANDARD_NO_PAD),
             Self::FromBase64Permissive          => bail!("Base64Permissive is one-way"),
-            Self::FromBase64CustomPermissive(_) => bail!("Base64CustomPermissive is one-way"),
+
+            Self::FromBase64URL                 => Self::untransform_base64(buffer, base64::URL_SAFE),
+            Self::FromBase64URLNoPadding        => Self::untransform_base64(buffer, base64::URL_SAFE_NO_PAD),
+            Self::FromBase64URLPermissive       => bail!("Base64URLPermissive is one-way"),
 
             Self::FromBase32                    => Self::untransform_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
             Self::FromBase32NoPadding           => Self::untransform_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
@@ -279,12 +292,15 @@ impl Transformation {
     pub fn can_transform(&self, buffer: &Vec<u8>) -> bool {
         match self {
             Self::Null                               => Self::check_null(buffer),
-            Self::XorByConstant(c)                   => Self::check_xor8(buffer, *c),
+            Self::XorByConstant8(c)                  => Self::check_xor8(buffer, *c),
 
             Self::FromBase64                         => Self::check_base64(buffer, base64::STANDARD),
-            Self::FromBase64Custom(config)           => Self::check_base64(buffer, *config),
-            Self::FromBase64Permissive               => Self::check_base64_permissive(buffer, base64::STANDARD),
-            Self::FromBase64CustomPermissive(config) => Self::check_base64_permissive(buffer, *config),
+            Self::FromBase64NoPadding                => Self::check_base64(buffer, base64::STANDARD_NO_PAD),
+            Self::FromBase64Permissive               => Self::check_base64_permissive(buffer, base64::STANDARD_NO_PAD),
+
+            Self::FromBase64URL                      => Self::check_base64(buffer, base64::URL_SAFE),
+            Self::FromBase64URLNoPadding             => Self::check_base64(buffer, base64::URL_SAFE_NO_PAD),
+            Self::FromBase64URLPermissive            => Self::check_base64_permissive(buffer, base64::URL_SAFE_NO_PAD),
 
             Self::FromBase32                         => Self::check_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
             Self::FromBase32NoPadding                => Self::check_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
@@ -301,14 +317,17 @@ impl Transformation {
     pub fn can_untransform(&self) -> bool {
         match self {
             Self::Null                          => true,
-            Self::XorByConstant(_)              => true,
+            Self::XorByConstant8(_)             => true,
             Self::FromBase64                    => true,
-            Self::FromBase64Custom(_)           => true,
-            Self::FromBase64Permissive          => false,
-            Self::FromBase64CustomPermissive(_) => false,
+            Self::FromBase64NoPadding           => true,
+            Self::FromBase64URL                 => true,
+            Self::FromBase64URLNoPadding        => true,
             Self::FromBase32                    => true,
             Self::FromBase32NoPadding           => true,
             Self::FromBase32Crockford           => true,
+
+            Self::FromBase64Permissive          => false,
+            Self::FromBase64URLPermissive       => false,
             Self::FromBase32Permissive          => false,
             Self::FromBase32CrockfordPermissive => false,
             Self::FromDeflated                  => false,
@@ -352,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_xor_by_constant() -> SimpleResult<()> {
-        assert_eq!(true, Transformation::XorByConstant(0).can_untransform());
+        assert_eq!(true, Transformation::XorByConstant8(0).can_untransform());
 
         let tests: Vec<(u8, Vec<u8>, SimpleResult<Vec<u8>>)> = vec![
             (0, vec![],              Ok(vec![])),
@@ -371,10 +390,10 @@ mod tests {
         ];
 
         for (c, test, expected) in tests {
-            let result = Transformation::XorByConstant(c).transform(test.clone());
+            let result = Transformation::XorByConstant8(c).transform(test.clone());
             assert_eq!(expected, result);
 
-            let result = Transformation::XorByConstant(c).untransform(result?);
+            let result = Transformation::XorByConstant8(c).untransform(result?);
             assert_eq!(Ok(test), result);
         }
 
@@ -392,107 +411,78 @@ mod tests {
         assert_eq!(true, t.can_untransform());
 
         // Empty string: ""
-        let t = Transformation::FromBase64;
         let result = t.transform(b(b""))?;
         assert_eq!(b(b""), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b""), original);
 
         // Short string: "\x00"
-        let t = Transformation::FromBase64;
         let result = t.transform(b(b"AA=="))?;
         assert_eq!(b(b"\x00"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AA=="), original);
 
         // Longer string: "\x00\x01\x02\x03\x04\x05\x06"
-        let t = Transformation::FromBase64;
         let result = t.transform(b(b"AAECAwQFBg=="))?;
         assert_eq!(b(b"\x00\x01\x02\x03\x04\x05\x06"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AAECAwQFBg=="), original);
 
         // Weird string: "\x69\xaf\xbe\xff\x3f"
-        let t = Transformation::FromBase64;
         let result = t.transform(b(b"aa++/z8="))?;
         assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"aa++/z8="), original);
 
         // Do padding wrong
-        let t = Transformation::FromBase64;
         assert!(t.transform(b(b"AA")).is_err());
         assert!(t.transform(b(b"AA=")).is_err());
         assert!(t.transform(b(b"AA===")).is_err());
         assert!(t.transform(b(b"AA====")).is_err());
 
         // Wrong characters
-        let t = Transformation::FromBase64;
         assert!(t.transform(b(b"aa--_z8=")).is_err());
 
         Ok(())
     }
 
     #[test]
-    fn test_base64_custom() -> SimpleResult<()> {
-        let t = Transformation::FromBase64Custom(base64::STANDARD_NO_PAD);
+    fn test_base64_standard_no_padding() -> SimpleResult<()> {
+        let t = Transformation::FromBase64NoPadding;
         assert_eq!(true, t.can_untransform());
 
         // Empty string: ""
-        let t = Transformation::FromBase64Custom(base64::STANDARD_NO_PAD);
         let result = t.transform(b(b""))?;
         assert_eq!(b(b""), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b""), original);
 
         // Short string: "\x00"
-        let t = Transformation::FromBase64Custom(base64::STANDARD_NO_PAD);
         let result = t.transform(b(b"AA"))?;
         assert_eq!(b(b"\x00"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AA"), original);
 
         // Longer string: "\x00\x01\x02\x03\x04\x05\x06"
-        let t = Transformation::FromBase64Custom(base64::STANDARD_NO_PAD);
         let result = t.transform(b(b"AAECAwQFBg"))?;
         assert_eq!(b(b"\x00\x01\x02\x03\x04\x05\x06"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AAECAwQFBg"), original);
 
         // Weird string: "\x69\xaf\xbe\xff\x3f"
-        let t = Transformation::FromBase64Custom(base64::STANDARD_NO_PAD);
         let result = t.transform(b(b"aa++/z8"))?;
         assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"aa++/z8"), original);
 
-        // URL Safe with odd characters: "\x69\xaf\xbe\xff\x3f"
-        let t = Transformation::FromBase64Custom(base64::URL_SAFE);
-        let result = t.transform(b(b"aa--_z8="))?;
-        assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
-        let original = t.untransform(result)?;
-        assert_eq!(b(b"aa--_z8="), original);
-
-        // URL Safe with odd characters and no padding: "\x69\xaf\xbe\xff\x3f"
-        let t = Transformation::FromBase64Custom(base64::URL_SAFE_NO_PAD);
-        let result = t.transform(b(b"aa--_z8"))?;
-        assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
-        let original = t.untransform(result)?;
-        assert_eq!(b(b"aa--_z8"), original);
-
         // Do padding wrong
-        let t = Transformation::FromBase64Custom(base64::STANDARD_NO_PAD);
+        assert!(t.transform(b(b"AA=")).is_err());
         assert!(t.transform(b(b"AA==")).is_err());
-        assert!(t.transform(b(b"AAE=")).is_err());
-        assert!(t.transform(b(b"AAECAw==")).is_err());
+        assert!(t.transform(b(b"AA===")).is_err());
+        assert!(t.transform(b(b"AA====")).is_err());
 
-        // Wrong characters for standard
-        let t = Transformation::FromBase64Custom(base64::STANDARD_NO_PAD);
+        // Wrong characters
         assert!(t.transform(b(b"aa--_z8")).is_err());
-
-        // Wrong characters for URL
-        let t = Transformation::FromBase64Custom(base64::URL_SAFE);
-        assert!(t.transform(b(b"aa++/z8=")).is_err());
 
         Ok(())
     }
@@ -503,12 +493,10 @@ mod tests {
         assert_eq!(false, t.can_untransform());
 
         // Empty string: ""
-        let t = Transformation::FromBase64Permissive;
         let result = t.transform(b(b""))?;
         assert_eq!(b(b""), result);
 
         // Short string: "\x00" with various padding
-        let t = Transformation::FromBase64Permissive;
         assert_eq!(b(b"\x00"), t.transform(b(b"AA"))?);
         assert_eq!(b(b"\x00"), t.transform(b(b"AA="))?);
         assert_eq!(b(b"\x00"), t.transform(b(b"AA=="))?);
@@ -519,6 +507,107 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_base64_url() -> SimpleResult<()> {
+        let t = Transformation::FromBase64URL;
+        assert_eq!(true, t.can_untransform());
+
+        // Empty string: ""
+        let result = t.transform(b(b""))?;
+        assert_eq!(b(b""), result);
+        let original = t.untransform(result)?;
+        assert_eq!(b(b""), original);
+
+        // Short string: "\x00"
+        let result = t.transform(b(b"AA=="))?;
+        assert_eq!(b(b"\x00"), result);
+        let original = t.untransform(result)?;
+        assert_eq!(b(b"AA=="), original);
+
+        // Longer string: "\x00\x01\x02\x03\x04\x05\x06"
+        let result = t.transform(b(b"AAECAwQFBg=="))?;
+        assert_eq!(b(b"\x00\x01\x02\x03\x04\x05\x06"), result);
+        let original = t.untransform(result)?;
+        assert_eq!(b(b"AAECAwQFBg=="), original);
+
+        // Weird string: "\x69\xaf\xbe\xff\x3f"
+        let result = t.transform(b(b"aa--_z8="))?;
+        assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
+        let original = t.untransform(result)?;
+        assert_eq!(b(b"aa--_z8="), original);
+
+        // Do padding wrong
+        assert!(t.transform(b(b"AA")).is_err());
+        assert!(t.transform(b(b"AA=")).is_err());
+        assert!(t.transform(b(b"AA===")).is_err());
+        assert!(t.transform(b(b"AA====")).is_err());
+
+        // Wrong characters
+        assert!(t.transform(b(b"aa++/z8=")).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_base64_standard_url_no_padding() -> SimpleResult<()> {
+        let t = Transformation::FromBase64URLNoPadding;
+        assert_eq!(true, t.can_untransform());
+
+        // Empty string: ""
+        let result = t.transform(b(b""))?;
+        assert_eq!(b(b""), result);
+        let original = t.untransform(result)?;
+        assert_eq!(b(b""), original);
+
+        // Short string: "\x00"
+        let result = t.transform(b(b"AA"))?;
+        assert_eq!(b(b"\x00"), result);
+        let original = t.untransform(result)?;
+        assert_eq!(b(b"AA"), original);
+
+        // Longer string: "\x00\x01\x02\x03\x04\x05\x06"
+        let result = t.transform(b(b"AAECAwQFBg"))?;
+        assert_eq!(b(b"\x00\x01\x02\x03\x04\x05\x06"), result);
+        let original = t.untransform(result)?;
+        assert_eq!(b(b"AAECAwQFBg"), original);
+
+        // Weird string: "\x69\xaf\xbe\xff\x3f"
+        let result = t.transform(b(b"aa--_z8"))?;
+        assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
+        let original = t.untransform(result)?;
+        assert_eq!(b(b"aa--_z8"), original);
+
+        // Do padding wrong
+        assert!(t.transform(b(b"AA=")).is_err());
+        assert!(t.transform(b(b"AA==")).is_err());
+        assert!(t.transform(b(b"AA===")).is_err());
+        assert!(t.transform(b(b"AA====")).is_err());
+
+        // Wrong characters
+        assert!(t.transform(b(b"aa++/z8")).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_base64_url_permissive() -> SimpleResult<()> {
+        let t = Transformation::FromBase64URLPermissive;
+        assert_eq!(false, t.can_untransform());
+
+        // Empty string: ""
+        let result = t.transform(b(b""))?;
+        assert_eq!(b(b""), result);
+
+        // Short string: "\x00" with various padding
+        assert_eq!(b(b"\x00"), t.transform(b(b"AA"))?);
+        assert_eq!(b(b"\x00"), t.transform(b(b"AA="))?);
+        assert_eq!(b(b"\x00"), t.transform(b(b"AA=="))?);
+
+        // Add a bunch of control characters
+        assert_eq!(b(b"\x00\x00\x00\x00"), t.transform(b(b"A A\nAAA\n    \t\rA=\n="))?);
+
+        Ok(())
+    }
     #[test]
     fn test_base32_standard() -> SimpleResult<()> {
         let t = Transformation::FromBase32;
@@ -822,7 +911,8 @@ mod tests {
 
     #[test]
     fn test_detect() -> SimpleResult<()> {
-        // let r = Transformation::detect(&b(b"\x78\x9c\x03\x00\x00\x00\x00\x01"));
+        //let r = Transformation::detect(&b(b"\x78\x9c\x03\x00\x00\x00\x00\x01"));
+        //assert!(r.contains(Transformation::Null));
         // let expected: Vec<Transformation> = vec![
         //     Transformation::Null,
         //     Transformation::FromBase32Permissive,
