@@ -35,14 +35,19 @@ use inflate;
 #[cfg(feature = "serialize")]
 use serde::{Serialize, Deserialize};
 
+#[derive(Clone, Debug, PartialOrd, PartialEq, Copy)]
+pub enum XorSize {
+    EightBit(u8),
+    SixteenBit(u16),
+    ThirtyTwoBit(u32),
+    SixtyFourBit(u64),
+}
+
 #[derive(Clone, Debug, PartialOrd, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Transformation {
     Null,
-    XorByConstant8(u8),
-    XorByConstant16(u16),
-    XorByConstant32(u32),
-    XorByConstant64(u64),
+    XorByConstant(XorSize),
 
     FromBase64,
     FromBase64NoPadding,
@@ -100,109 +105,86 @@ impl Transformation {
         true
     }
 
-    fn transform_xor8(mut buffer: Vec<u8>, c: u8) -> SimpleResult<Vec<u8>> {
-        // Transform in-place, since we can
-        for n in &mut buffer {
-            *n = *n ^ c;
-        }
-        Ok(buffer)
-    }
-
-    fn untransform_xor8(buffer: Vec<u8>, c: u8) -> SimpleResult<Vec<u8>> {
-        Self::transform_xor8(buffer, c)
-    }
-
-    fn check_xor8(_buffer: &Vec<u8>, _c: u8) -> bool {
-        true
-    }
-
-    fn transform_xor16(mut buffer: Vec<u8>, c: u16) -> SimpleResult<Vec<u8>> {
-        if !Self::check_xor16(&buffer, c) {
-            bail!("Buffer isn't a multiple of 16 bits");
+    fn transform_xor(mut buffer: Vec<u8>, xs: XorSize) -> SimpleResult<Vec<u8>> {
+        if !Self::check_xor(&buffer, xs) {
+            bail!("Xor failed: Xor isn't a multiple of the buffer size");
         }
 
-        let xorer: Vec<u8> = vec![
-            ((c >> 8) & 0x00FF) as u8,
-            ((c >> 0) & 0x00FF) as u8,
-        ];
+        // TODO: Validate size
+        match xs {
+            XorSize::EightBit(c) => {
+                // Transform in-place, since we can
+                for n in &mut buffer {
+                    *n = *n ^ c;
+                }
+            },
+            XorSize::SixteenBit(c) => {
+                let xorer: Vec<u8> = vec![
+                    ((c >> 8) & 0x00FF) as u8,
+                    ((c >> 0) & 0x00FF) as u8,
+                ];
 
-        let mut xor_position: usize = 0;
-        for n in &mut buffer {
-            *n = *n ^ (xorer[xor_position]);
-            xor_position = (xor_position + 1) % 2;
-        }
+                let mut xor_position: usize = 0;
+                for n in &mut buffer {
+                    *n = *n ^ (xorer[xor_position]);
+                    xor_position = (xor_position + 1) % 2;
+                }
+            },
+            XorSize::ThirtyTwoBit(c) => {
+                let xorer: Vec<u8> = vec![
+                    ((c >> 24) & 0x00FF) as u8,
+                    ((c >> 16) & 0x00FF) as u8,
+                    ((c >> 8)  & 0x00FF) as u8,
+                    ((c >> 0)  & 0x00FF) as u8,
+                ];
 
-        Ok(buffer)
-    }
+                let mut xor_position: usize = 0;
+                for n in &mut buffer {
+                    *n = *n ^ (xorer[xor_position]);
+                    xor_position = (xor_position + 1) % 4;
+                }
+            },
+            XorSize::SixtyFourBit(c) => {
+                let xorer: Vec<u8> = vec![
+                    ((c >> 56) & 0x00FF) as u8,
+                    ((c >> 48) & 0x00FF) as u8,
+                    ((c >> 40) & 0x00FF) as u8,
+                    ((c >> 32) & 0x00FF) as u8,
+                    ((c >> 24) & 0x00FF) as u8,
+                    ((c >> 16) & 0x00FF) as u8,
+                    ((c >> 8)  & 0x00FF) as u8,
+                    ((c >> 0)  & 0x00FF) as u8,
+                ];
 
-    fn untransform_xor16(buffer: Vec<u8>, c: u16) -> SimpleResult<Vec<u8>> {
-        Self::transform_xor16(buffer, c)
-    }
-
-    fn check_xor16(buffer: &Vec<u8>, _c: u16) -> bool {
-        (buffer.len() % 2) == 0
-    }
-
-    fn transform_xor32(mut buffer: Vec<u8>, c: u32) -> SimpleResult<Vec<u8>> {
-        if !Self::check_xor32(&buffer, c) {
-            bail!("Buffer isn't a multiple of 32 bits");
-        }
-
-        let xorer: Vec<u8> = vec![
-            ((c >> 24) & 0x00FF) as u8,
-            ((c >> 16) & 0x00FF) as u8,
-            ((c >> 8)  & 0x00FF) as u8,
-            ((c >> 0)  & 0x00FF) as u8,
-        ];
-
-        let mut xor_position: usize = 0;
-        for n in &mut buffer {
-            *n = *n ^ (xorer[xor_position]);
-            xor_position = (xor_position + 1) % 4;
-        }
-
-        Ok(buffer)
-    }
-
-    fn untransform_xor32(buffer: Vec<u8>, c: u32) -> SimpleResult<Vec<u8>> {
-        Self::transform_xor32(buffer, c)
-    }
-
-    fn check_xor32(buffer: &Vec<u8>, _c: u32) -> bool {
-        (buffer.len() % 4) == 0
-    }
-
-    fn transform_xor64(mut buffer: Vec<u8>, c: u64) -> SimpleResult<Vec<u8>> {
-        if !Self::check_xor64(&buffer, c) {
-            bail!("Buffer isn't a multiple of 32 bits");
-        }
-
-        let xorer: Vec<u8> = vec![
-            ((c >> 56) & 0x00FF) as u8,
-            ((c >> 48) & 0x00FF) as u8,
-            ((c >> 40) & 0x00FF) as u8,
-            ((c >> 32) & 0x00FF) as u8,
-            ((c >> 24) & 0x00FF) as u8,
-            ((c >> 16) & 0x00FF) as u8,
-            ((c >> 8)  & 0x00FF) as u8,
-            ((c >> 0)  & 0x00FF) as u8,
-        ];
-
-        let mut xor_position: usize = 0;
-        for n in &mut buffer {
-            *n = *n ^ (xorer[xor_position]);
-            xor_position = (xor_position + 1) % 8;
-        }
+                let mut xor_position: usize = 0;
+                for n in &mut buffer {
+                    *n = *n ^ (xorer[xor_position]);
+                    xor_position = (xor_position + 1) % 8;
+                }
+            },
+        };
 
         Ok(buffer)
     }
 
-    fn untransform_xor64(buffer: Vec<u8>, c: u64) -> SimpleResult<Vec<u8>> {
-        Self::transform_xor64(buffer, c)
+    fn untransform_xor(buffer: Vec<u8>, xs: XorSize) -> SimpleResult<Vec<u8>> {
+        // Untransform is identical to transform
+        Self::transform_xor(buffer, xs)
     }
 
-    fn check_xor64(buffer: &Vec<u8>, _c: u64) -> bool {
-        (buffer.len() % 8) == 0
+    fn check_xor(buffer: &Vec<u8>, xs: XorSize) -> bool {
+        match xs {
+            XorSize::EightBit(_)     => true,
+            XorSize::SixteenBit(_)   => {
+                (buffer.len() % 2) == 0
+            },
+            XorSize::ThirtyTwoBit(_) => {
+                (buffer.len() % 4) == 0
+            },
+            XorSize::SixtyFourBit(_) => {
+                (buffer.len() % 8) == 0
+            },
+        }
     }
 
     fn transform_base64(buffer: Vec<u8>, config: base64::Config) -> SimpleResult<Vec<u8>> {
@@ -339,10 +321,7 @@ impl Transformation {
 
         match self {
             Self::Null                               => Self::transform_null(buffer),
-            Self::XorByConstant8(c)                  => Self::transform_xor8(buffer, *c),
-            Self::XorByConstant16(c)                 => Self::transform_xor16(buffer, *c),
-            Self::XorByConstant32(c)                 => Self::transform_xor32(buffer, *c),
-            Self::XorByConstant64(c)                 => Self::transform_xor64(buffer, *c),
+            Self::XorByConstant(xs)                  => Self::transform_xor(buffer, *xs),
 
             Self::FromBase64                         => Self::transform_base64(buffer, base64::STANDARD),
             Self::FromBase64NoPadding                => Self::transform_base64(buffer, base64::STANDARD_NO_PAD),
@@ -372,10 +351,7 @@ impl Transformation {
 
         match self {
             Self::Null                          => Self::untransform_null(buffer),
-            Self::XorByConstant8(c)             => Self::untransform_xor8(buffer, *c),
-            Self::XorByConstant16(c)            => Self::untransform_xor16(buffer, *c),
-            Self::XorByConstant32(c)            => Self::untransform_xor32(buffer, *c),
-            Self::XorByConstant64(c)            => Self::untransform_xor64(buffer, *c),
+            Self::XorByConstant(xs)             => Self::untransform_xor(buffer, *xs),
 
             Self::FromBase64                    => Self::untransform_base64(buffer, base64::STANDARD),
             Self::FromBase64NoPadding           => Self::untransform_base64(buffer, base64::STANDARD_NO_PAD),
@@ -405,10 +381,7 @@ impl Transformation {
 
         match self {
             Self::Null                               => Self::check_null(buffer),
-            Self::XorByConstant8(c)                  => Self::check_xor8(buffer, *c),
-            Self::XorByConstant16(c)                 => Self::check_xor16(buffer, *c),
-            Self::XorByConstant32(c)                 => Self::check_xor32(buffer, *c),
-            Self::XorByConstant64(c)                 => Self::check_xor64(buffer, *c),
+            Self::XorByConstant(xs)                  => Self::check_xor(buffer, *xs),
 
             Self::FromBase64                         => Self::check_base64(buffer, base64::STANDARD),
             Self::FromBase64NoPadding                => Self::check_base64(buffer, base64::STANDARD_NO_PAD),
@@ -433,10 +406,7 @@ impl Transformation {
     pub fn can_untransform(&self) -> bool {
         match self {
             Self::Null                          => true,
-            Self::XorByConstant8(_)             => true,
-            Self::XorByConstant16(_)            => true,
-            Self::XorByConstant32(_)            => true,
-            Self::XorByConstant64(_)            => true,
+            Self::XorByConstant(_)              => true,
             Self::FromBase64                    => true,
             Self::FromBase64NoPadding           => true,
             Self::FromBase64URL                 => true,
@@ -489,7 +459,7 @@ mod tests {
 
     #[test]
     fn test_xor8() -> SimpleResult<()> {
-        assert_eq!(true, Transformation::XorByConstant8(0).can_untransform());
+        assert_eq!(true, Transformation::XorByConstant(XorSize::EightBit(0)).can_untransform());
 
         let tests: Vec<(u8, Vec<u8>, SimpleResult<Vec<u8>>)> = vec![
             (0, vec![1],             Ok(vec![1])),
@@ -506,10 +476,10 @@ mod tests {
         ];
 
         for (c, test, expected) in tests {
-            let result = Transformation::XorByConstant8(c).transform(test.clone());
+            let result = Transformation::XorByConstant(XorSize::EightBit(c)).transform(test.clone());
             assert_eq!(expected, result);
 
-            let result = Transformation::XorByConstant8(c).untransform(result?);
+            let result = Transformation::XorByConstant(XorSize::EightBit(c)).untransform(result?);
             assert_eq!(Ok(test), result);
         }
 
@@ -518,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_xor16() -> SimpleResult<()> {
-        let t = Transformation::XorByConstant16(0x0000);
+        let t = Transformation::XorByConstant(XorSize::SixteenBit(0x0000));
 
         // It can transform even-length vectors
         assert!(t.can_transform(&vec![0x11, 0x22]));
@@ -529,14 +499,14 @@ mod tests {
         assert!(!t.can_transform(&vec![0x11, 0x22, 0x33]));
 
         // Simplest examples
-        let t = Transformation::XorByConstant16(0x0000);
+        let t = Transformation::XorByConstant(XorSize::SixteenBit(0x0000));
         assert_eq!(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66], t.transform(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66])?);
 
-        let t = Transformation::XorByConstant16(0xFFFF);
+        let t = Transformation::XorByConstant(XorSize::SixteenBit(0xFFFF));
         assert_eq!(vec![0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99], t.transform(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66])?);
 
         // More complex examples
-        let t = Transformation::XorByConstant16(0x1234);
+        let t = Transformation::XorByConstant(XorSize::SixteenBit(0x1234));
 
         // First byte: 0x11 & 0x12 = 0x03
         // Second byte: 0x22 & 0x34 = 0x16
@@ -554,7 +524,7 @@ mod tests {
 
     #[test]
     fn test_xor32() -> SimpleResult<()> {
-        let t = Transformation::XorByConstant32(0x00000000);
+        let t = Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x00000000));
 
         // It can transform multiple-of-4 vectors
         assert!(t.can_transform(&vec![0x11, 0x22, 0x33, 0x44]));
@@ -567,14 +537,14 @@ mod tests {
         assert!(!t.can_transform(&vec![0x11, 0x22, 0x33, 0x44, 0x55]));
 
         // Simplest examples
-        let t = Transformation::XorByConstant32(0x00000000);
+        let t = Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x00000000));
         assert_eq!(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88], t.transform(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])?);
 
-        let t = Transformation::XorByConstant32(0xFFFFFFFF);
+        let t = Transformation::XorByConstant(XorSize::ThirtyTwoBit(0xFFFFFFFF));
         assert_eq!(vec![0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88, 0x77], t.transform(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])?);
 
         // More complex examples
-        let t = Transformation::XorByConstant32(0x12345678);
+        let t = Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x12345678));
 
         // First byte:  0x11 & 0x12 = 0x03
         // Second byte: 0x22 & 0x34 = 0x16
@@ -595,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_xor64() -> SimpleResult<()> {
-        let t = Transformation::XorByConstant64(0x0000000000000000);
+        let t = Transformation::XorByConstant(XorSize::SixtyFourBit(0x0000000000000000));
 
         // It can transform multiple-of-8 vectors
         assert!(t.can_transform(&vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77]));
@@ -612,20 +582,20 @@ mod tests {
         assert!(!t.can_transform(&vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]));
 
         // Simplest examples
-        let t = Transformation::XorByConstant64(0x0000000000000000);
+        let t = Transformation::XorByConstant(XorSize::SixtyFourBit(0x0000000000000000));
         assert_eq!(
             vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
             t.transform(vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff])?
         );
 
-        let t = Transformation::XorByConstant64(0xFFFFFFFFFFFFFFFF);
+        let t = Transformation::XorByConstant(XorSize::SixtyFourBit(0xFFFFFFFFFFFFFFFF));
         assert_eq!(
             vec![0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00],
             t.transform(vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff])?
         );
 
         // // More complex examples
-        let t = Transformation::XorByConstant64(0x0123456789abcdef);
+        let t = Transformation::XorByConstant(XorSize::SixtyFourBit(0x0123456789abcdef));
 
         // First byte:   0x00 & 0x01 = 0x01
         // Second byte:  0x11 & 0x23 = 0x32
