@@ -40,6 +40,9 @@ use serde::{Serialize, Deserialize};
 pub enum Transformation {
     Null,
     XorByConstant8(u8),
+    XorByConstant16(u16),
+    XorByConstant32(u32),
+    XorByConstant64(u64),
 
     FromBase64,
     FromBase64NoPadding,
@@ -111,6 +114,42 @@ impl Transformation {
 
     fn check_xor8(_buffer: &Vec<u8>, _c: u8) -> bool {
         true
+    }
+
+    fn transform_xor16(mut _buffer: Vec<u8>, _c: u16) -> SimpleResult<Vec<u8>> {
+        bail!("Not implemented");
+    }
+
+    fn untransform_xor16(buffer: Vec<u8>, c: u16) -> SimpleResult<Vec<u8>> {
+        Self::transform_xor16(buffer, c)
+    }
+
+    fn check_xor16(buffer: &Vec<u8>, _c: u16) -> bool {
+        (buffer.len() % 2) == 0
+    }
+
+    fn transform_xor32(mut _buffer: Vec<u8>, _c: u32) -> SimpleResult<Vec<u8>> {
+        bail!("Not implemented");
+    }
+
+    fn untransform_xor32(buffer: Vec<u8>, c: u32) -> SimpleResult<Vec<u8>> {
+        Self::transform_xor32(buffer, c)
+    }
+
+    fn check_xor32(buffer: &Vec<u8>, _c: u32) -> bool {
+        (buffer.len() % 4) == 0
+    }
+
+    fn transform_xor64(mut _buffer: Vec<u8>, _c: u64) -> SimpleResult<Vec<u8>> {
+        bail!("Not implemented");
+    }
+
+    fn untransform_xor64(buffer: Vec<u8>, c: u64) -> SimpleResult<Vec<u8>> {
+        Self::transform_xor64(buffer, c)
+    }
+
+    fn check_xor64(buffer: &Vec<u8>, _c: u64) -> bool {
+        (buffer.len() % 8) == 0
     }
 
     fn transform_base64(buffer: Vec<u8>, config: base64::Config) -> SimpleResult<Vec<u8>> {
@@ -243,6 +282,9 @@ impl Transformation {
         match self {
             Self::Null                               => Self::transform_null(buffer),
             Self::XorByConstant8(c)                  => Self::transform_xor8(buffer, *c),
+            Self::XorByConstant16(c)                 => Self::transform_xor16(buffer, *c),
+            Self::XorByConstant32(c)                 => Self::transform_xor32(buffer, *c),
+            Self::XorByConstant64(c)                 => Self::transform_xor64(buffer, *c),
 
             Self::FromBase64                         => Self::transform_base64(buffer, base64::STANDARD),
             Self::FromBase64NoPadding                => Self::transform_base64(buffer, base64::STANDARD_NO_PAD),
@@ -268,6 +310,9 @@ impl Transformation {
         match self {
             Self::Null                          => Self::untransform_null(buffer),
             Self::XorByConstant8(c)             => Self::untransform_xor8(buffer, *c),
+            Self::XorByConstant16(c)            => Self::untransform_xor16(buffer, *c),
+            Self::XorByConstant32(c)            => Self::untransform_xor32(buffer, *c),
+            Self::XorByConstant64(c)            => Self::untransform_xor64(buffer, *c),
 
             Self::FromBase64                    => Self::untransform_base64(buffer, base64::STANDARD),
             Self::FromBase64NoPadding           => Self::untransform_base64(buffer, base64::STANDARD_NO_PAD),
@@ -293,6 +338,9 @@ impl Transformation {
         match self {
             Self::Null                               => Self::check_null(buffer),
             Self::XorByConstant8(c)                  => Self::check_xor8(buffer, *c),
+            Self::XorByConstant16(c)                 => Self::check_xor16(buffer, *c),
+            Self::XorByConstant32(c)                 => Self::check_xor32(buffer, *c),
+            Self::XorByConstant64(c)                 => Self::check_xor64(buffer, *c),
 
             Self::FromBase64                         => Self::check_base64(buffer, base64::STANDARD),
             Self::FromBase64NoPadding                => Self::check_base64(buffer, base64::STANDARD_NO_PAD),
@@ -318,6 +366,9 @@ impl Transformation {
         match self {
             Self::Null                          => true,
             Self::XorByConstant8(_)             => true,
+            Self::XorByConstant16(_)            => true,
+            Self::XorByConstant32(_)            => true,
+            Self::XorByConstant64(_)            => true,
             Self::FromBase64                    => true,
             Self::FromBase64NoPadding           => true,
             Self::FromBase64URL                 => true,
