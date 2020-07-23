@@ -34,7 +34,7 @@ use inflate;
 #[cfg(feature = "serialize")]
 use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Debug, PartialOrd, PartialEq, Copy)]
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Copy)]
 pub enum XorSize {
     EightBit(u8),
     SixteenBit(u16),
@@ -42,7 +42,7 @@ pub enum XorSize {
     SixtyFourBit(u64),
 }
 
-#[derive(Clone, Debug, PartialOrd, PartialEq)]
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Copy)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Transformation {
     Null,
@@ -69,21 +69,14 @@ pub enum Transformation {
     FromHex,
 }
 
-const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 15] = [
-    Transformation::Null,
-
+const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 10] = [
     Transformation::FromBase64,
     Transformation::FromBase64NoPadding,
-    Transformation::FromBase64Permissive,
     Transformation::FromBase64URL,
     Transformation::FromBase64URLNoPadding,
-    Transformation::FromBase64URLPermissive,
     Transformation::FromBase32,
     Transformation::FromBase32NoPadding,
     Transformation::FromBase32Crockford,
-
-    Transformation::FromBase32Permissive,
-    Transformation::FromBase32CrockfordPermissive,
 
     Transformation::FromDeflated,
     Transformation::FromDeflatedZlib,
@@ -296,8 +289,9 @@ impl Transformation {
     }
 
     fn check_deflated(buffer: &Vec<u8>) -> bool {
-        // The only reasonable way to check is by just doing it
-        Self::transform_deflated(buffer.clone()).is_ok()
+        // Extra short strings kinda sorta decode, but a zero-length string is
+        // a minimum 6 characters so just enforce that
+        buffer.len() > 5 && Self::transform_deflated(buffer.clone()).is_ok()
     }
 
     fn transform_deflated_zlib(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
@@ -1166,23 +1160,104 @@ mod tests {
 
     #[test]
     fn test_detect() -> SimpleResult<()> {
-        //let r = Transformation::detect(&b(b"\x78\x9c\x03\x00\x00\x00\x00\x01"));
-        //assert!(r.contains(Transformation::Null));
-        // let expected: Vec<Transformation> = vec![
-        //     Transformation::Null,
-        //     Transformation::FromBase32Permissive,
-        //     Transformation::FromBase32CrockfordPermissive,
-        //     Transformation::FromDeflatedZlib
-        // ];
-        // assert_eq!(expected, r);
+        let tests: Vec<_> = vec![
+            (
+                "Testcase: 'A'",
+                b(b"A"),
+                vec![
+                ],
+            ),
 
-        //println!("{:?}", ;
+            (
+                "Testcase: 'AA'",
+                b(b"AA"),
+                vec![
+                    &Transformation::FromBase64NoPadding,
+                    &Transformation::FromBase64URLNoPadding,
+                    &Transformation::FromHex,
+                    &Transformation::FromBase32NoPadding,
+                    &Transformation::FromBase32Crockford,
+                ],
+            ),
 
-        // println!("{:?}", Transformation::detect(&b(b"AAECAwQFBg==")));
-        // println!("{:?}", Transformation::detect(&b(b"aa--_z8")));
-        // println!("{:?}", Transformation::detect(&b(b"\x03\x00\x00\x00\x00\x01")));
-        // println!("{:?}", Transformation::detect(&b(b"IE=====")));
-        // println!("{:?}", Transformation::detect(&b(b"A A\nAAA\n    \t\rA=\n=")));
+            (
+                "Testcase: 'AA=='",
+                b(b"AA=="),
+                vec![
+                    &Transformation::FromBase64,
+                    &Transformation::FromBase64URL,
+                ],
+            ),
+
+            (
+                "Testcase: '/+AAAA=='",
+                b(b"/+AAAA=="),
+                vec![
+                    &Transformation::FromBase64,
+                ],
+            ),
+
+            (
+                "Testcase: '-_AAAA=='",
+                b(b"-_AAAA=="),
+                vec![
+                    &Transformation::FromBase64URL,
+                    &Transformation::FromDeflated,
+                ],
+            ),
+
+            (
+                "Testcase: Simple deflated",
+                b(b"\x03\x00\x00\x00\x00\x01"),
+                vec![
+                    &Transformation::FromDeflated,
+                ]
+            ),
+
+            (
+                "Testcase: Zlib deflated",
+                b(b"\x78\x9c\x03\x00\x00\x00\x00\x01"),
+                vec![
+                    &Transformation::FromDeflatedZlib,
+                ]
+            ),
+
+            (
+                "Testcase: Base32",
+                b(b"ORSXG5BRGIZSA2DFNRWG6==="),
+                vec![
+                    &Transformation::FromBase32,
+                ]
+            ),
+
+            (
+                "Testcase: Base32 no padding",
+                b(b"ORSXG5BRGIZSA2DFNRWG6"),
+                vec![
+                    &Transformation::FromBase32NoPadding,
+                    &Transformation::FromBase32Crockford,
+                ]
+            ),
+
+            (
+                "Testcase: Base32 crockford",
+                b(b"EHJQ6X1H68SJ0T35DHP6Y"),
+                vec![
+                    &Transformation::FromBase32Crockford,
+                ]
+            ),
+        ];
+
+        // Do this in a loop since we have to sort both vectors
+        for (desc, s, r) in tests {
+            let mut t = Transformation::detect(&s);
+            t.sort();
+
+            let mut r = r.clone();
+            r.sort();
+
+            assert_eq!(t, r, "{}", desc);
+        }
 
         Ok(())
     }
