@@ -2,14 +2,13 @@
 //!
 //! H2Transformer is a library for transforming raw data between encodings.
 //!
-//!
 //! # Features
 //!
 //! Conversions are bidirectional when possible. That means data can be
 //! converted, edited, then converted back *without changing the length*.
 //!
-//! There is NO guarantee that the data will be identical aftewards, however;
-//! `FromBase32` will normalize case.
+//! There is NO guarantee that the data will be identical afterwards, however;
+//! for example, `FromBase32` will normalize case.
 //!
 //! The other big feature is detecting encoding. A buffer can be analyzed and
 //! a list of possible formats are returned.
@@ -67,11 +66,10 @@ pub enum Transformation {
     FromDeflated,
     FromDeflatedZlib,
 
-    //FromHex,
-    //FromBinary,
+    FromHex,
 }
 
-const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 14] = [
+const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 15] = [
     Transformation::Null,
 
     Transformation::FromBase64,
@@ -89,8 +87,9 @@ const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 14] = [
 
     Transformation::FromDeflated,
     Transformation::FromDeflatedZlib,
+
+    Transformation::FromHex,
 ];
-// ]);
 
 impl Transformation {
     fn transform_null(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
@@ -313,6 +312,38 @@ impl Transformation {
         Self::transform_deflated_zlib(buffer.clone()).is_ok()
     }
 
+    fn transform_hex(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
+        let s = match String::from_utf8(buffer) {
+            Ok(s) => s,
+            Err(e) => bail!("Couldn't convert the buffer into a string: {}", e),
+        };
+
+        match hex::decode(s) {
+            Ok(s) => Ok(s),
+            Err(e) => bail!("Couldn't decode hex: {}", e),
+        }
+    }
+
+    fn untransform_hex(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
+        Ok(hex::encode(buffer).into_bytes())
+    }
+
+    fn check_hex(buffer: &Vec<u8>) -> bool {
+        Self::transform_hex(buffer.clone()).is_ok()
+    }
+
+    // fn transform_XXX(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
+    //     bai!l("Not implemented yet!");
+    // }
+
+    // fn untransform_XXX(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
+    //     bail!("Not implemented yet!");
+    // }
+
+    // fn check_XXX(buffer: &Vec<u8>) -> bool {
+    //     bail!("Not implemented yet!");
+    // }
+
     pub fn transform(&self, buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         // We can never handle 0-length buffers
         if buffer.len() == 0 {
@@ -320,26 +351,30 @@ impl Transformation {
         }
 
         match self {
-            Self::Null                               => Self::transform_null(buffer),
-            Self::XorByConstant(xs)                  => Self::transform_xor(buffer, *xs),
+            Self::Null                          => Self::transform_null(buffer),
+            Self::XorByConstant(xs)             => Self::transform_xor(buffer, *xs),
 
-            Self::FromBase64                         => Self::transform_base64(buffer, base64::STANDARD),
-            Self::FromBase64NoPadding                => Self::transform_base64(buffer, base64::STANDARD_NO_PAD),
-            Self::FromBase64Permissive               => Self::transform_base64_permissive(buffer, base64::STANDARD_NO_PAD),
+            Self::FromBase64                    => Self::transform_base64(buffer, base64::STANDARD),
+            Self::FromBase64NoPadding           => Self::transform_base64(buffer, base64::STANDARD_NO_PAD),
+            Self::FromBase64Permissive          => Self::transform_base64_permissive(buffer, base64::STANDARD_NO_PAD),
 
-            Self::FromBase64URL                      => Self::transform_base64(buffer, base64::URL_SAFE),
-            Self::FromBase64URLNoPadding             => Self::transform_base64(buffer, base64::URL_SAFE_NO_PAD),
-            Self::FromBase64URLPermissive            => Self::transform_base64_permissive(buffer, base64::URL_SAFE_NO_PAD),
+            Self::FromBase64URL                 => Self::transform_base64(buffer, base64::URL_SAFE),
+            Self::FromBase64URLNoPadding        => Self::transform_base64(buffer, base64::URL_SAFE_NO_PAD),
+            Self::FromBase64URLPermissive       => Self::transform_base64_permissive(buffer, base64::URL_SAFE_NO_PAD),
 
-            Self::FromBase32                         => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
-            Self::FromBase32NoPadding                => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
-            Self::FromBase32Crockford                => Self::transform_base32(buffer, base32::Alphabet::Crockford),
+            Self::FromBase32                    => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
+            Self::FromBase32NoPadding           => Self::transform_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
+            Self::FromBase32Crockford           => Self::transform_base32(buffer, base32::Alphabet::Crockford),
 
-            Self::FromBase32Permissive               => Self::transform_base32_permissive(buffer, base32::Alphabet::RFC4648 { padding: false }),
-            Self::FromBase32CrockfordPermissive      => Self::transform_base32_permissive(buffer, base32::Alphabet::Crockford),
+            Self::FromBase32Permissive          => Self::transform_base32_permissive(buffer, base32::Alphabet::RFC4648 { padding: false }),
+            Self::FromBase32CrockfordPermissive => Self::transform_base32_permissive(buffer, base32::Alphabet::Crockford),
 
-            Self::FromDeflated                       => Self::transform_deflated(buffer),
-            Self::FromDeflatedZlib                   => Self::transform_deflated_zlib(buffer),
+            Self::FromDeflated                  => Self::transform_deflated(buffer),
+            Self::FromDeflatedZlib              => Self::transform_deflated_zlib(buffer),
+
+            Self::FromHex                       => Self::transform_hex(buffer),
+
+            //Self::From                          => Self::transform_(buffer),
         }
     }
 
@@ -370,6 +405,10 @@ impl Transformation {
 
             Self::FromDeflated                  => bail!("Deflated is one-way"),
             Self::FromDeflatedZlib              => bail!("DeflatedZlib is one-way"),
+
+            Self::FromHex                       => Self::untransform_hex(buffer),
+
+            //Self::From                          => Self::untransform_(buffer),
         }
     }
 
@@ -380,26 +419,30 @@ impl Transformation {
         }
 
         match self {
-            Self::Null                               => Self::check_null(buffer),
-            Self::XorByConstant(xs)                  => Self::check_xor(buffer, *xs),
+            Self::Null                          => Self::check_null(buffer),
+            Self::XorByConstant(xs)             => Self::check_xor(buffer, *xs),
 
-            Self::FromBase64                         => Self::check_base64(buffer, base64::STANDARD),
-            Self::FromBase64NoPadding                => Self::check_base64(buffer, base64::STANDARD_NO_PAD),
-            Self::FromBase64Permissive               => Self::check_base64_permissive(buffer, base64::STANDARD_NO_PAD),
+            Self::FromBase64                    => Self::check_base64(buffer, base64::STANDARD),
+            Self::FromBase64NoPadding           => Self::check_base64(buffer, base64::STANDARD_NO_PAD),
+            Self::FromBase64Permissive          => Self::check_base64_permissive(buffer, base64::STANDARD_NO_PAD),
 
-            Self::FromBase64URL                      => Self::check_base64(buffer, base64::URL_SAFE),
-            Self::FromBase64URLNoPadding             => Self::check_base64(buffer, base64::URL_SAFE_NO_PAD),
-            Self::FromBase64URLPermissive            => Self::check_base64_permissive(buffer, base64::URL_SAFE_NO_PAD),
+            Self::FromBase64URL                 => Self::check_base64(buffer, base64::URL_SAFE),
+            Self::FromBase64URLNoPadding        => Self::check_base64(buffer, base64::URL_SAFE_NO_PAD),
+            Self::FromBase64URLPermissive       => Self::check_base64_permissive(buffer, base64::URL_SAFE_NO_PAD),
 
-            Self::FromBase32                         => Self::check_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
-            Self::FromBase32NoPadding                => Self::check_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
-            Self::FromBase32Crockford                => Self::check_base32(buffer, base32::Alphabet::Crockford),
+            Self::FromBase32                    => Self::check_base32(buffer, base32::Alphabet::RFC4648 { padding: true }),
+            Self::FromBase32NoPadding           => Self::check_base32(buffer, base32::Alphabet::RFC4648 { padding: false }),
+            Self::FromBase32Crockford           => Self::check_base32(buffer, base32::Alphabet::Crockford),
 
-            Self::FromBase32Permissive               => Self::check_base32_permissive(buffer, base32::Alphabet::RFC4648 { padding: false }),
-            Self::FromBase32CrockfordPermissive      => Self::check_base32_permissive(buffer, base32::Alphabet::Crockford),
+            Self::FromBase32Permissive          => Self::check_base32_permissive(buffer, base32::Alphabet::RFC4648 { padding: false }),
+            Self::FromBase32CrockfordPermissive => Self::check_base32_permissive(buffer, base32::Alphabet::Crockford),
 
-            Self::FromDeflated                       => Self::check_deflated(buffer),
-            Self::FromDeflatedZlib                   => Self::check_deflated_zlib(buffer),
+            Self::FromDeflated                  => Self::check_deflated(buffer),
+            Self::FromDeflatedZlib              => Self::check_deflated_zlib(buffer),
+
+            Self::FromHex                       => Self::check_hex(buffer),
+
+            //Self::From                          => Self::check_(buffer),
         }
     }
 
@@ -414,6 +457,7 @@ impl Transformation {
             Self::FromBase32                    => true,
             Self::FromBase32NoPadding           => true,
             Self::FromBase32Crockford           => true,
+            Self::FromHex                       => true,
 
             Self::FromBase64Permissive          => false,
             Self::FromBase64URLPermissive       => false,
@@ -421,6 +465,7 @@ impl Transformation {
             Self::FromBase32CrockfordPermissive => false,
             Self::FromDeflated                  => false,
             Self::FromDeflatedZlib              => false,
+
         }
     }
 
@@ -447,6 +492,8 @@ mod tests {
         ];
 
         for (test, expected) in tests {
+            assert!(Transformation::Null.can_transform(&test));
+
             let result = Transformation::Null.transform(test.clone());
             assert_eq!(expected, result);
 
@@ -476,6 +523,8 @@ mod tests {
         ];
 
         for (c, test, expected) in tests {
+            assert!(Transformation::XorByConstant(XorSize::EightBit(c)).can_transform(&test));
+
             let result = Transformation::XorByConstant(XorSize::EightBit(c)).transform(test.clone());
             assert_eq!(expected, result);
 
@@ -637,24 +686,32 @@ mod tests {
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
+        assert!(t.can_transform(&b(b"AA==")));
         let result = t.transform(b(b"AA=="))?;
         assert_eq!(b(b"\x00"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AA=="), original);
 
         // Longer string: "\x00\x01\x02\x03\x04\x05\x06"
+        assert!(t.can_transform(&b(b"AAECAwQFBg==")));
         let result = t.transform(b(b"AAECAwQFBg=="))?;
         assert_eq!(b(b"\x00\x01\x02\x03\x04\x05\x06"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AAECAwQFBg=="), original);
 
         // Weird string: "\x69\xaf\xbe\xff\x3f"
+        assert!(t.can_transform(&b(b"aa++/z8=")));
         let result = t.transform(b(b"aa++/z8="))?;
         assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"aa++/z8="), original);
 
         // Do padding wrong
+        assert!(!t.can_transform(&b(b"AA")));
+        assert!(!t.can_transform(&b(b"AA=")));
+        assert!(!t.can_transform(&b(b"AA===")));
+        assert!(!t.can_transform(&b(b"AA====")));
+
         assert!(t.transform(b(b"AA")).is_err());
         assert!(t.transform(b(b"AA=")).is_err());
         assert!(t.transform(b(b"AA===")).is_err());
@@ -672,12 +729,14 @@ mod tests {
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
+        assert!(t.can_transform(&b(b"AA")));
         let result = t.transform(b(b"AA"))?;
         assert_eq!(b(b"\x00"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"AA"), original);
 
         // Longer string: "\x00\x01\x02\x03\x04\x05\x06"
+        assert!(t.can_transform(&b(b"AAECAwQFBg")));
         let result = t.transform(b(b"AAECAwQFBg"))?;
         assert_eq!(b(b"\x00\x01\x02\x03\x04\x05\x06"), result);
         let original = t.untransform(result)?;
@@ -707,6 +766,9 @@ mod tests {
         assert_eq!(false, t.can_untransform());
 
         // Short string: "\x00" with various padding
+        assert!(t.can_transform(&b(b"AA")));
+        assert!(t.can_transform(&b(b"AA=")));
+        assert!(t.can_transform(&b(b"AA==")));
         assert_eq!(b(b"\x00"), t.transform(b(b"AA"))?);
         assert_eq!(b(b"\x00"), t.transform(b(b"AA="))?);
         assert_eq!(b(b"\x00"), t.transform(b(b"AA=="))?);
@@ -738,6 +800,7 @@ mod tests {
         let result = t.transform(b(b"aa--_z8="))?;
         assert_eq!(b(b"\x69\xaf\xbe\xff\x3f"), result);
         let original = t.untransform(result)?;
+        assert!(t.can_transform(&b(b"aa--_z8=")));
         assert_eq!(b(b"aa--_z8="), original);
 
         // Do padding wrong
@@ -747,6 +810,7 @@ mod tests {
         assert!(t.transform(b(b"AA====")).is_err());
 
         // Wrong characters
+        assert!(!t.can_transform(&b(b"aa++/z8=")));
         assert!(t.transform(b(b"aa++/z8=")).is_err());
 
         Ok(())
@@ -802,6 +866,7 @@ mod tests {
 
         Ok(())
     }
+
     #[test]
     fn test_base32_standard() -> SimpleResult<()> {
         let t = Transformation::FromBase32;
@@ -1068,6 +1133,33 @@ mod tests {
 
         // Try an intentional error
         assert!(t.transform(b(b"\xFF")).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hex() -> SimpleResult<()> {
+        let t = Transformation::FromHex;
+
+        assert!(t.can_untransform());
+        assert!(t.can_transform(&b(b"00")));
+        assert!(t.can_transform(&b(b"0001")));
+        assert!(t.can_transform(&b(b"000102feff")));
+        assert!(!t.can_transform(&b(b"0")));
+        assert!(!t.can_transform(&b(b"001")));
+        assert!(!t.can_transform(&b(b"00102FEff")));
+        assert!(!t.can_transform(&b(b"fg")));
+        assert!(!t.can_transform(&b(b"+=")));
+
+        assert_eq!(vec![0x00], t.transform(b(b"00"))?);
+        assert_eq!(vec![0x00, 0x01], t.transform(b(b"0001"))?);
+        assert_eq!(vec![0x00, 0x01, 0x02, 0xfe, 0xff], t.transform(b(b"000102fEFf"))?);
+
+        assert_eq!(b(b"00"), t.untransform(vec![0x00])?);
+        assert_eq!(b(b"0001"), t.untransform(vec![0x00, 0x01])?);
+        assert_eq!(b(b"000102feff"), t.untransform(vec![0x00, 0x01, 0x02, 0xfe, 0xff])?);
+
+        assert!(t.transform(b(b"abababag")).is_err());
 
         Ok(())
     }
