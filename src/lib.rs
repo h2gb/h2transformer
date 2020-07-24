@@ -44,7 +44,7 @@ pub enum XorSize {
 
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Copy)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-pub enum Transformation {
+pub enum H2Transformation {
     Null,
     XorByConstant(XorSize),
 
@@ -69,22 +69,22 @@ pub enum Transformation {
     FromHex,
 }
 
-const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [Transformation; 10] = [
-    Transformation::FromBase64,
-    Transformation::FromBase64NoPadding,
-    Transformation::FromBase64URL,
-    Transformation::FromBase64URLNoPadding,
-    Transformation::FromBase32,
-    Transformation::FromBase32NoPadding,
-    Transformation::FromBase32Crockford,
+const TRANSFORMATIONS_THAT_CAN_BE_DETECTED: [H2Transformation; 10] = [
+    H2Transformation::FromBase64,
+    H2Transformation::FromBase64NoPadding,
+    H2Transformation::FromBase64URL,
+    H2Transformation::FromBase64URLNoPadding,
+    H2Transformation::FromBase32,
+    H2Transformation::FromBase32NoPadding,
+    H2Transformation::FromBase32Crockford,
 
-    Transformation::FromDeflated,
-    Transformation::FromDeflatedZlib,
+    H2Transformation::FromDeflated,
+    H2Transformation::FromDeflatedZlib,
 
-    Transformation::FromHex,
+    H2Transformation::FromHex,
 ];
 
-impl Transformation {
+impl H2Transformation {
     fn transform_null(buffer: Vec<u8>) -> SimpleResult<Vec<u8>> {
         Ok(buffer)
     }
@@ -463,7 +463,7 @@ impl Transformation {
         }
     }
 
-    pub fn detect(buffer: &Vec<u8>) -> Vec<&Transformation> {
+    pub fn detect(buffer: &Vec<u8>) -> Vec<&H2Transformation> {
         TRANSFORMATIONS_THAT_CAN_BE_DETECTED.iter().filter(|t| {
             t.can_transform(buffer)
         }).collect()
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn test_null() -> SimpleResult<()> {
-        assert_eq!(true, Transformation::Null.can_untransform());
+        assert_eq!(true, H2Transformation::Null.can_untransform());
 
         let tests: Vec<(Vec<u8>, SimpleResult<Vec<u8>>)> = vec![
             (vec![1],             Ok(vec![1])),
@@ -486,12 +486,12 @@ mod tests {
         ];
 
         for (test, expected) in tests {
-            assert!(Transformation::Null.can_transform(&test));
+            assert!(H2Transformation::Null.can_transform(&test));
 
-            let result = Transformation::Null.transform(test.clone());
+            let result = H2Transformation::Null.transform(test.clone());
             assert_eq!(expected, result);
 
-            let result = Transformation::Null.untransform(result?);
+            let result = H2Transformation::Null.untransform(result?);
             assert_eq!(Ok(test), result);
         }
 
@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_xor8() -> SimpleResult<()> {
-        assert_eq!(true, Transformation::XorByConstant(XorSize::EightBit(0)).can_untransform());
+        assert_eq!(true, H2Transformation::XorByConstant(XorSize::EightBit(0)).can_untransform());
 
         let tests: Vec<(u8, Vec<u8>, SimpleResult<Vec<u8>>)> = vec![
             (0, vec![1],             Ok(vec![1])),
@@ -517,12 +517,12 @@ mod tests {
         ];
 
         for (c, test, expected) in tests {
-            assert!(Transformation::XorByConstant(XorSize::EightBit(c)).can_transform(&test));
+            assert!(H2Transformation::XorByConstant(XorSize::EightBit(c)).can_transform(&test));
 
-            let result = Transformation::XorByConstant(XorSize::EightBit(c)).transform(test.clone());
+            let result = H2Transformation::XorByConstant(XorSize::EightBit(c)).transform(test.clone());
             assert_eq!(expected, result);
 
-            let result = Transformation::XorByConstant(XorSize::EightBit(c)).untransform(result?);
+            let result = H2Transformation::XorByConstant(XorSize::EightBit(c)).untransform(result?);
             assert_eq!(Ok(test), result);
         }
 
@@ -531,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_xor16() -> SimpleResult<()> {
-        let t = Transformation::XorByConstant(XorSize::SixteenBit(0x0000));
+        let t = H2Transformation::XorByConstant(XorSize::SixteenBit(0x0000));
 
         // It can transform even-length vectors
         assert!(t.can_transform(&vec![0x11, 0x22]));
@@ -542,14 +542,14 @@ mod tests {
         assert!(!t.can_transform(&vec![0x11, 0x22, 0x33]));
 
         // Simplest examples
-        let t = Transformation::XorByConstant(XorSize::SixteenBit(0x0000));
+        let t = H2Transformation::XorByConstant(XorSize::SixteenBit(0x0000));
         assert_eq!(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66], t.transform(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66])?);
 
-        let t = Transformation::XorByConstant(XorSize::SixteenBit(0xFFFF));
+        let t = H2Transformation::XorByConstant(XorSize::SixteenBit(0xFFFF));
         assert_eq!(vec![0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99], t.transform(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66])?);
 
         // More complex examples
-        let t = Transformation::XorByConstant(XorSize::SixteenBit(0x1234));
+        let t = H2Transformation::XorByConstant(XorSize::SixteenBit(0x1234));
 
         // First byte: 0x11 & 0x12 = 0x03
         // Second byte: 0x22 & 0x34 = 0x16
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn test_xor32() -> SimpleResult<()> {
-        let t = Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x00000000));
+        let t = H2Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x00000000));
 
         // It can transform multiple-of-4 vectors
         assert!(t.can_transform(&vec![0x11, 0x22, 0x33, 0x44]));
@@ -580,14 +580,14 @@ mod tests {
         assert!(!t.can_transform(&vec![0x11, 0x22, 0x33, 0x44, 0x55]));
 
         // Simplest examples
-        let t = Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x00000000));
+        let t = H2Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x00000000));
         assert_eq!(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88], t.transform(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])?);
 
-        let t = Transformation::XorByConstant(XorSize::ThirtyTwoBit(0xFFFFFFFF));
+        let t = H2Transformation::XorByConstant(XorSize::ThirtyTwoBit(0xFFFFFFFF));
         assert_eq!(vec![0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88, 0x77], t.transform(vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])?);
 
         // More complex examples
-        let t = Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x12345678));
+        let t = H2Transformation::XorByConstant(XorSize::ThirtyTwoBit(0x12345678));
 
         // First byte:  0x11 & 0x12 = 0x03
         // Second byte: 0x22 & 0x34 = 0x16
@@ -608,7 +608,7 @@ mod tests {
 
     #[test]
     fn test_xor64() -> SimpleResult<()> {
-        let t = Transformation::XorByConstant(XorSize::SixtyFourBit(0x0000000000000000));
+        let t = H2Transformation::XorByConstant(XorSize::SixtyFourBit(0x0000000000000000));
 
         // It can transform multiple-of-8 vectors
         assert!(t.can_transform(&vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77]));
@@ -625,20 +625,20 @@ mod tests {
         assert!(!t.can_transform(&vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]));
 
         // Simplest examples
-        let t = Transformation::XorByConstant(XorSize::SixtyFourBit(0x0000000000000000));
+        let t = H2Transformation::XorByConstant(XorSize::SixtyFourBit(0x0000000000000000));
         assert_eq!(
             vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
             t.transform(vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff])?
         );
 
-        let t = Transformation::XorByConstant(XorSize::SixtyFourBit(0xFFFFFFFFFFFFFFFF));
+        let t = H2Transformation::XorByConstant(XorSize::SixtyFourBit(0xFFFFFFFFFFFFFFFF));
         assert_eq!(
             vec![0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00],
             t.transform(vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff])?
         );
 
         // // More complex examples
-        let t = Transformation::XorByConstant(XorSize::SixtyFourBit(0x0123456789abcdef));
+        let t = H2Transformation::XorByConstant(XorSize::SixtyFourBit(0x0123456789abcdef));
 
         // First byte:   0x00 & 0x01 = 0x01
         // Second byte:  0x11 & 0x23 = 0x32
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_base64_standard() -> SimpleResult<()> {
-        let t = Transformation::FromBase64;
+        let t = H2Transformation::FromBase64;
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
@@ -719,7 +719,7 @@ mod tests {
 
     #[test]
     fn test_base64_standard_no_padding() -> SimpleResult<()> {
-        let t = Transformation::FromBase64NoPadding;
+        let t = H2Transformation::FromBase64NoPadding;
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
@@ -756,7 +756,7 @@ mod tests {
 
     #[test]
     fn test_base64_permissive() -> SimpleResult<()> {
-        let t = Transformation::FromBase64Permissive;
+        let t = H2Transformation::FromBase64Permissive;
         assert_eq!(false, t.can_untransform());
 
         // Short string: "\x00" with various padding
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn test_base64_url() -> SimpleResult<()> {
-        let t = Transformation::FromBase64URL;
+        let t = H2Transformation::FromBase64URL;
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
@@ -812,7 +812,7 @@ mod tests {
 
     #[test]
     fn test_base64_standard_url_no_padding() -> SimpleResult<()> {
-        let t = Transformation::FromBase64URLNoPadding;
+        let t = H2Transformation::FromBase64URLNoPadding;
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn test_base64_url_permissive() -> SimpleResult<()> {
-        let t = Transformation::FromBase64URLPermissive;
+        let t = H2Transformation::FromBase64URLPermissive;
         assert_eq!(false, t.can_untransform());
 
         // Short string: "\x00" with various padding
@@ -863,32 +863,32 @@ mod tests {
 
     #[test]
     fn test_base32_standard() -> SimpleResult<()> {
-        let t = Transformation::FromBase32;
+        let t = H2Transformation::FromBase32;
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
-        let t = Transformation::FromBase32;
+        let t = H2Transformation::FromBase32;
         let result = t.transform(b(b"IE======"))?;
         assert_eq!(b(b"A"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IE======"), original);
 
         // Longer string: "ABCDEF"
-        let t = Transformation::FromBase32;
+        let t = H2Transformation::FromBase32;
         let result = t.transform(b(b"IFBEGRCFIY======"))?;
         assert_eq!(b(b"ABCDEF"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IFBEGRCFIY======"), original);
 
         // It's okay to be case insensitive
-        let t = Transformation::FromBase32;
+        let t = H2Transformation::FromBase32;
         let result = t.transform(b(b"ifbegrcfiy======"))?;
         assert_eq!(b(b"ABCDEF"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IFBEGRCFIY======"), original);
 
         // Do padding wrong
-        let t = Transformation::FromBase32;
+        let t = H2Transformation::FromBase32;
         assert!(t.transform(b(b"IE")).is_err());
         assert!(t.transform(b(b"IE=")).is_err());
         assert!(t.transform(b(b"IE==")).is_err());
@@ -899,7 +899,7 @@ mod tests {
         assert!(t.transform(b(b"IE========")).is_err());
 
         // Wrong characters
-        let t = Transformation::FromBase32;
+        let t = H2Transformation::FromBase32;
         assert!(t.transform(b(b"I.======")).is_err());
 
         Ok(())
@@ -907,32 +907,32 @@ mod tests {
 
     #[test]
     fn test_base32_no_padding() -> SimpleResult<()> {
-        let t = Transformation::FromBase32NoPadding;
+        let t = H2Transformation::FromBase32NoPadding;
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
-        let t = Transformation::FromBase32NoPadding;
+        let t = H2Transformation::FromBase32NoPadding;
         let result = t.transform(b(b"IE"))?;
         assert_eq!(b(b"A"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IE"), original);
 
         // Longer string: "ABCDEF"
-        let t = Transformation::FromBase32NoPadding;
+        let t = H2Transformation::FromBase32NoPadding;
         let result = t.transform(b(b"IFBEGRCFIY"))?;
         assert_eq!(b(b"ABCDEF"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IFBEGRCFIY"), original);
 
         // It's okay to be case insensitive
-        let t = Transformation::FromBase32NoPadding;
+        let t = H2Transformation::FromBase32NoPadding;
         let result = t.transform(b(b"ifbegrcfiy"))?;
         assert_eq!(b(b"ABCDEF"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"IFBEGRCFIY"), original);
 
         // Do padding wrong
-        let t = Transformation::FromBase32NoPadding;
+        let t = H2Transformation::FromBase32NoPadding;
         assert!(t.transform(b(b"IE=")).is_err());
         assert!(t.transform(b(b"IE==")).is_err());
         assert!(t.transform(b(b"IE===")).is_err());
@@ -943,7 +943,7 @@ mod tests {
         assert!(t.transform(b(b"IE========")).is_err());
 
         // Wrong characters
-        let t = Transformation::FromBase32NoPadding;
+        let t = H2Transformation::FromBase32NoPadding;
         assert!(t.transform(b(b"A.")).is_err());
 
         Ok(())
@@ -951,32 +951,32 @@ mod tests {
 
     #[test]
     fn test_base32_crockford() -> SimpleResult<()> {
-        let t = Transformation::FromBase32Crockford;
+        let t = H2Transformation::FromBase32Crockford;
         assert_eq!(true, t.can_untransform());
 
         // Short string: "\x00"
-        let t = Transformation::FromBase32Crockford;
+        let t = H2Transformation::FromBase32Crockford;
         let result = t.transform(b(b"84"))?;
         assert_eq!(b(b"A"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"84"), original);
 
         // Longer string: "ABCDEF"
-        let t = Transformation::FromBase32Crockford;
+        let t = H2Transformation::FromBase32Crockford;
         let result = t.transform(b(b"85146H258R"))?;
         assert_eq!(b(b"ABCDEF"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"85146H258R"), original);
 
         // It's okay to be case insensitive
-        let t = Transformation::FromBase32Crockford;
+        let t = H2Transformation::FromBase32Crockford;
         let result = t.transform(b(b"85146h258r"))?;
         assert_eq!(b(b"ABCDEF"), result);
         let original = t.untransform(result)?;
         assert_eq!(b(b"85146H258R"), original);
 
         // Do padding wrong
-        let t = Transformation::FromBase32Crockford;
+        let t = H2Transformation::FromBase32Crockford;
         assert!(t.transform(b(b"84=")).is_err());
         assert!(t.transform(b(b"84==")).is_err());
         assert!(t.transform(b(b"84===")).is_err());
@@ -987,7 +987,7 @@ mod tests {
         assert!(t.transform(b(b"84========")).is_err());
 
         // Wrong characters
-        let t = Transformation::FromBase32Crockford;
+        let t = H2Transformation::FromBase32Crockford;
         assert!(t.transform(b(b"A.")).is_err());
 
         Ok(())
@@ -995,26 +995,26 @@ mod tests {
 
     #[test]
     fn test_base32_permissive() -> SimpleResult<()> {
-        let t = Transformation::FromBase32Permissive;
+        let t = H2Transformation::FromBase32Permissive;
         assert_eq!(false, t.can_untransform());
 
         // Short string: "\x00"
-        let t = Transformation::FromBase32Permissive;
+        let t = H2Transformation::FromBase32Permissive;
         let result = t.transform(b(b"IE======"))?;
         assert_eq!(b(b"A"), result);
 
         // Longer string: "ABCDEF"
-        let t = Transformation::FromBase32Permissive;
+        let t = H2Transformation::FromBase32Permissive;
         let result = t.transform(b(b"IFBEGRCFIY======"))?;
         assert_eq!(b(b"ABCDEF"), result);
 
         // It's okay to be case insensitive
-        let t = Transformation::FromBase32Permissive;
+        let t = H2Transformation::FromBase32Permissive;
         let result = t.transform(b(b"ifbegrcfiy======"))?;
         assert_eq!(b(b"ABCDEF"), result);
 
         // Do padding wrong
-        let t = Transformation::FromBase32Permissive;
+        let t = H2Transformation::FromBase32Permissive;
         assert_eq!(b(b"A"), t.transform(b(b"IE"))?);
         assert_eq!(b(b"A"), t.transform(b(b"IE="))?);
         assert_eq!(b(b"A"), t.transform(b(b"IE=="))?);
@@ -1034,26 +1034,26 @@ mod tests {
 
     #[test]
     fn test_base32_crockford_permissive() -> SimpleResult<()> {
-        let t = Transformation::FromBase32CrockfordPermissive;
+        let t = H2Transformation::FromBase32CrockfordPermissive;
         assert_eq!(false, t.can_untransform());
 
         // Short string: "\x00"
-        let t = Transformation::FromBase32CrockfordPermissive;
+        let t = H2Transformation::FromBase32CrockfordPermissive;
         let result = t.transform(b(b"84======"))?;
         assert_eq!(b(b"A"), result);
 
         // Longer string: "ABCDEF"
-        let t = Transformation::FromBase32CrockfordPermissive;
+        let t = H2Transformation::FromBase32CrockfordPermissive;
         let result = t.transform(b(b"85146H258R======"))?;
         assert_eq!(b(b"ABCDEF"), result);
 
         // It's okay to be case insensitive
-        let t = Transformation::FromBase32CrockfordPermissive;
+        let t = H2Transformation::FromBase32CrockfordPermissive;
         let result = t.transform(b(b"85146h258r======"))?;
         assert_eq!(b(b"ABCDEF"), result);
 
         // Do padding wrong
-        let t = Transformation::FromBase32CrockfordPermissive;
+        let t = H2Transformation::FromBase32CrockfordPermissive;
         assert_eq!(b(b"A"), t.transform(b(b"84"))?);
         assert_eq!(b(b"A"), t.transform(b(b"84="))?);
         assert_eq!(b(b"A"), t.transform(b(b"84=="))?);
@@ -1073,7 +1073,7 @@ mod tests {
 
     #[test]
     fn test_deflate() -> SimpleResult<()> {
-        let t = Transformation::FromDeflated;
+        let t = H2Transformation::FromDeflated;
 
         let result = t.transform(b(b"\x03\x00\x00\x00\x00\x01"))?;
         assert_eq!(0, result.len());
@@ -1103,7 +1103,7 @@ mod tests {
 
     #[test]
     fn test_deflate_zlib() -> SimpleResult<()> {
-        let t = Transformation::FromDeflatedZlib;
+        let t = H2Transformation::FromDeflatedZlib;
 
         let result = t.transform(b(b"\x78\x9c\x03\x00\x00\x00\x00\x01"))?;
         assert_eq!(0, result.len());
@@ -1133,7 +1133,7 @@ mod tests {
 
     #[test]
     fn test_hex() -> SimpleResult<()> {
-        let t = Transformation::FromHex;
+        let t = H2Transformation::FromHex;
 
         assert!(t.can_untransform());
         assert!(t.can_transform(&b(b"00")));
@@ -1172,11 +1172,11 @@ mod tests {
                 "Testcase: 'AA'",
                 b(b"AA"),
                 vec![
-                    &Transformation::FromBase64NoPadding,
-                    &Transformation::FromBase64URLNoPadding,
-                    &Transformation::FromHex,
-                    &Transformation::FromBase32NoPadding,
-                    &Transformation::FromBase32Crockford,
+                    &H2Transformation::FromBase64NoPadding,
+                    &H2Transformation::FromBase64URLNoPadding,
+                    &H2Transformation::FromHex,
+                    &H2Transformation::FromBase32NoPadding,
+                    &H2Transformation::FromBase32Crockford,
                 ],
             ),
 
@@ -1184,8 +1184,8 @@ mod tests {
                 "Testcase: 'AA=='",
                 b(b"AA=="),
                 vec![
-                    &Transformation::FromBase64,
-                    &Transformation::FromBase64URL,
+                    &H2Transformation::FromBase64,
+                    &H2Transformation::FromBase64URL,
                 ],
             ),
 
@@ -1193,7 +1193,7 @@ mod tests {
                 "Testcase: '/+AAAA=='",
                 b(b"/+AAAA=="),
                 vec![
-                    &Transformation::FromBase64,
+                    &H2Transformation::FromBase64,
                 ],
             ),
 
@@ -1201,8 +1201,8 @@ mod tests {
                 "Testcase: '-_AAAA=='",
                 b(b"-_AAAA=="),
                 vec![
-                    &Transformation::FromBase64URL,
-                    &Transformation::FromDeflated,
+                    &H2Transformation::FromBase64URL,
+                    &H2Transformation::FromDeflated,
                 ],
             ),
 
@@ -1210,7 +1210,7 @@ mod tests {
                 "Testcase: Simple deflated",
                 b(b"\x03\x00\x00\x00\x00\x01"),
                 vec![
-                    &Transformation::FromDeflated,
+                    &H2Transformation::FromDeflated,
                 ]
             ),
 
@@ -1218,7 +1218,7 @@ mod tests {
                 "Testcase: Zlib deflated",
                 b(b"\x78\x9c\x03\x00\x00\x00\x00\x01"),
                 vec![
-                    &Transformation::FromDeflatedZlib,
+                    &H2Transformation::FromDeflatedZlib,
                 ]
             ),
 
@@ -1226,7 +1226,7 @@ mod tests {
                 "Testcase: Base32",
                 b(b"ORSXG5BRGIZSA2DFNRWG6==="),
                 vec![
-                    &Transformation::FromBase32,
+                    &H2Transformation::FromBase32,
                 ]
             ),
 
@@ -1234,8 +1234,8 @@ mod tests {
                 "Testcase: Base32 no padding",
                 b(b"ORSXG5BRGIZSA2DFNRWG6"),
                 vec![
-                    &Transformation::FromBase32NoPadding,
-                    &Transformation::FromBase32Crockford,
+                    &H2Transformation::FromBase32NoPadding,
+                    &H2Transformation::FromBase32Crockford,
                 ]
             ),
 
@@ -1243,14 +1243,14 @@ mod tests {
                 "Testcase: Base32 crockford",
                 b(b"EHJQ6X1H68SJ0T35DHP6Y"),
                 vec![
-                    &Transformation::FromBase32Crockford,
+                    &H2Transformation::FromBase32Crockford,
                 ]
             ),
         ];
 
         // Do this in a loop since we have to sort both vectors
         for (desc, s, r) in tests {
-            let mut t = Transformation::detect(&s);
+            let mut t = H2Transformation::detect(&s);
             t.sort();
 
             let mut r = r.clone();
