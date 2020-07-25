@@ -52,6 +52,7 @@ use serde::{Serialize, Deserialize};
 
 /// When performing an XorByConstant transformation, this holds the size
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Copy)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum XorSize {
     /// One byte / 8 bits - eg, `0x12`
     EightBit(u8),
