@@ -2,27 +2,43 @@
 //!
 //! H2Transformer is a library for transforming raw data between encodings.
 //!
-//! # Features
+//! As part of [h2gb](https://github.com/h2gb), it's common to extract a buffer
+//! from a binary that's encoded in some format - Base64, hex string, etc.
 //!
-//! Conversions are bidirectional when possible. That means data can be
-//! converted, edited, then converted back *without changing the length*.
+//! This library can detect and transform common formats. It can also
+//! transform back to the original data with a constant length, and also without
+//! saving any context, for certain formats.
 //!
-//! There is NO guarantee that the data will be identical afterwards, however;
-//! for example, `FromBase32` will normalize case.
+//! While length is static on un-transformations, the actual content may change.
+//! For example, the case of Base32 and Hex strings will have their case
+//! normalized.
 //!
-//! The other big feature is detecting encoding. A buffer can be analyzed and
-//! a list of possible formats are returned.
-//!
-//! We attempt to be efficient by - whenever possible - editing the buffer in-
-//! place. Detecting encoding is slow, however, since we literally clone +
-//! convert the vector.
+//! Check out the definition of the `H2Transformer` enum for full details!
 //!
 //! # Usage
 //!
-//! TODO
+//! The public API is pretty straight forward. Here's an example that transforms
+//! then untransforms some hex data:
 //!
 //!
 //! ```
+//! use h2transformer::H2Transformer;
+//!
+//! // Input (note that some are uppercase and some are lower - that's allowed)
+//! let i: Vec<u8> = b"48656c6C6F2c20776f726c64".to_vec();
+//!
+//! // Output
+//! let o = H2Transformer::FromHex.transform(i).unwrap();
+//!
+//! // It's "Hello, world"
+//! assert_eq!(b"Hello, world".to_vec(), o);
+//!
+//! // Transform back to the original
+//! let i = H2Transformer::FromHex.untransform(o).unwrap();
+//!
+//! // Get the original back - note that it's the same length, but the case has
+//! // been normalized
+//! assert_eq!(b"48656c6c6f2c20776f726c64".to_vec(), i);
 //! ```
 
 use simple_error::{SimpleResult, bail};
